@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <ConsultarLoteRpsRequest xmlns="http://notacarioca.rio.gov.br/">
+      <inputXML>&lt;ConsultarLoteRpsEnvio&gt;&lt;Prestador&gt;&lt;Cnpj&gt;11100003000113&lt;/Cnpj&gt;&lt;InscricaoMunicipal&gt;10000001&lt;/InscricaoMunicipal&gt;&lt;/Prestador&gt;&lt;Protocolo&gt;NC20261000000002&lt;/Protocolo&gt;&lt;/ConsultarLoteRpsEnvio&gt;</inputXML>
+    </ConsultarLoteRpsRequest>
+  </soap:Body>
+</soap:Envelope>

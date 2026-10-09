@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>NotaCarioca.WebServices</RootNamespace>
+    <AssemblyName>NotaCarioca.WebServices</AssemblyName>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\NotaCarioca.Servicos\NotaCarioca.Servicos.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="NfseWS.wsdl" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

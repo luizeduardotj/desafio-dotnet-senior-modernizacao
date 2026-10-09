@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <RecepcionarLoteRpsRequest xmlns="http://notacarioca.rio.gov.br/">
+      <inputXML>&lt;EnviarLoteRpsEnvio&gt;
+  &lt;LoteRps Id="lote1"&gt;
+    &lt;NumeroLote&gt;1&lt;/NumeroLote&gt;
+    &lt;Prestador&gt;&lt;Cnpj&gt;13500075000183&lt;/Cnpj&gt;&lt;InscricaoMunicipal&gt;10000025&lt;/InscricaoMunicipal&gt;&lt;/Prestador&gt;
+    &lt;QuantidadeRps&gt;4&lt;/QuantidadeRps&gt;
+    &lt;ListaRps&gt;
+      &lt;Rps&gt;
+        &lt;InfRps Id="rps1"&gt;
+          &lt;IdentificacaoRps&gt;&lt;Numero&gt;1&lt;/Numero&gt;&lt;Serie&gt;EX1&lt;/Serie&gt;&lt;Tipo&gt;1&lt;/Tipo&gt;&lt;/IdentificacaoRps&gt;
+          &lt;DataEmissao&gt;2026-10-09T10:00:00&lt;/DataEmissao&gt;
+          &lt;Servico&gt;
+            &lt;Valores&gt;&lt;ValorServicos&gt;1500.00&lt;/ValorServicos&gt;&lt;ValorDeducoes&gt;0.00&lt;/ValorDeducoes&gt;&lt;IssRetido&gt;2&lt;/IssRetido&gt;&lt;/Valores&gt;
+            &lt;ItemListaServico&gt;17.01&lt;/ItemListaServico&gt;
+            &lt;Discriminacao&gt;Consultoria em tecnologia da informacao - exemplo 1&lt;/Discriminacao&gt;
+          &lt;/Servico&gt;
+          &lt;Tomador&gt;
+            &lt;IdentificacaoTomador&gt;&lt;CpfCnpj&gt;&lt;Cnpj&gt;01234567000195&lt;/Cnpj&gt;&lt;/CpfCnpj&gt;&lt;/IdentificacaoTomador&gt;
+            &lt;RazaoSocial&gt;TOMADORA EXEMPLO 01 COMERCIO LTDA&lt;/RazaoSocial&gt;
+          &lt;/Tomador&gt;
+        &lt;/InfRps&gt;
+      &lt;/Rps&gt;
+      &lt;Rps&gt;
+        &lt;InfRps Id="rps2"&gt;
+          &lt;IdentificacaoRps&gt;&lt;Numero&gt;2&lt;/Numero&gt;&lt;Serie&gt;EX1&lt;/Serie&gt;&lt;Tipo&gt;1&lt;/Tipo&gt;&lt;/IdentificacaoRps&gt;
+          &lt;DataEmissao&gt;2026-10-09T10:00:00&lt;/DataEmissao&gt;
+          &lt;Servico&gt;
+            &lt;Valores&gt;&lt;ValorServicos&gt;320.50&lt;/ValorServicos&gt;&lt;ValorDeducoes&gt;20.50&lt;/ValorDeducoes&gt;&lt;IssRetido&gt;1&lt;/IssRetido&gt;&lt;/Valores&gt;
+            &lt;ItemListaServico&gt;01.07&lt;/ItemListaServico&gt;
+            &lt;Discriminacao&gt;Consultoria em tecnologia da informacao - exemplo 2&lt;/Discriminacao&gt;
+          &lt;/Servico&gt;
+          &lt;Tomador&gt;
+            &lt;IdentificacaoTomador&gt;&lt;CpfCnpj&gt;&lt;Cpf&gt;52998224725&lt;/Cpf&gt;&lt;/CpfCnpj&gt;&lt;/IdentificacaoTomador&gt;
+            &lt;RazaoSocial&gt;PESSOA FISICA EXEMPLO&lt;/RazaoSocial&gt;
+          &lt;/Tomador&gt;
+        &lt;/InfRps&gt;
+      &lt;/Rps&gt;
+      &lt;Rps&gt;
+        &lt;InfRps Id="rps3"&gt;
+          &lt;IdentificacaoRps&gt;&lt;Numero&gt;3&lt;/Numero&gt;&lt;Serie&gt;EX1&lt;/Serie&gt;&lt;Tipo&gt;1&lt;/Tipo&gt;&lt;/IdentificacaoRps&gt;
+          &lt;DataEmissao&gt;2026-10-09T10:00:00&lt;/DataEmissao&gt;
+          &lt;Servico&gt;
+            &lt;Valores&gt;&lt;ValorServicos&gt;100.00&lt;/ValorServicos&gt;&lt;ValorDeducoes&gt;0.00&lt;/ValorDeducoes&gt;&lt;IssRetido&gt;2&lt;/IssRetido&gt;&lt;/Valores&gt;
+            &lt;ItemListaServico&gt;99.99&lt;/ItemListaServico&gt;
+            &lt;Discriminacao&gt;Consultoria em tecnologia da informacao - exemplo 3&lt;/Discriminacao&gt;
+          &lt;/Servico&gt;
+          &lt;Tomador&gt;
+            &lt;IdentificacaoTomador&gt;&lt;CpfCnpj&gt;&lt;Cnpj&gt;01234567000195&lt;/Cnpj&gt;&lt;/CpfCnpj&gt;&lt;/IdentificacaoTomador&gt;
+            &lt;RazaoSocial&gt;TOMADORA EXEMPLO 01 COMERCIO LTDA&lt;/RazaoSocial&gt;
+          &lt;/Tomador&gt;
+        &lt;/InfRps&gt;
+      &lt;/Rps&gt;
+      &lt;Rps&gt;
+        &lt;InfRps Id="rps4"&gt;
+          &lt;IdentificacaoRps&gt;&lt;Numero&gt;4&lt;/Numero&gt;&lt;Serie&gt;EX1&lt;/Serie&gt;&lt;Tipo&gt;1&lt;/Tipo&gt;&lt;/IdentificacaoRps&gt;
+          &lt;DataEmissao&gt;2026-10-09T10:00:00&lt;/DataEmissao&gt;
+          &lt;Servico&gt;
+            &lt;Valores&gt;&lt;ValorServicos&gt;250.00&lt;/ValorServicos&gt;&lt;ValorDeducoes&gt;0.00&lt;/ValorDeducoes&gt;&lt;IssRetido&gt;2&lt;/IssRetido&gt;&lt;/Valores&gt;
+            &lt;ItemListaServico&gt;01.03&lt;/ItemListaServico&gt;
+            &lt;Discriminacao&gt;Consultoria em tecnologia da informacao - exemplo 4&lt;/Discriminacao&gt;
+          &lt;/Servico&gt;
+          &lt;Tomador&gt;
+            &lt;IdentificacaoTomador&gt;&lt;CpfCnpj&gt;&lt;Cnpj&gt;11111111111111&lt;/Cnpj&gt;&lt;/CpfCnpj&gt;&lt;/IdentificacaoTomador&gt;
+            &lt;RazaoSocial&gt;TOMADOR COM DOCUMENTO INVALIDO&lt;/RazaoSocial&gt;
+          &lt;/Tomador&gt;
+        &lt;/InfRps&gt;
+      &lt;/Rps&gt;
+    &lt;/ListaRps&gt;
+  &lt;/LoteRps&gt;
+&lt;/EnviarLoteRpsEnvio&gt;</inputXML>
+    </RecepcionarLoteRpsRequest>
+  </soap:Body>
+</soap:Envelope>

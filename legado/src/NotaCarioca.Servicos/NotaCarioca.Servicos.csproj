@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net48;net8.0</TargetFrameworks>
+    <RootNamespace>NotaCarioca.Servicos</RootNamespace>
+    <AssemblyName>NotaCarioca.Servicos</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\NotaCarioca.Dominio\NotaCarioca.Dominio.vbproj" />
+    <ProjectReference Include="..\NotaCarioca.Dados\NotaCarioca.Dados.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.Xml" Condition="'$(TargetFramework)' == 'net48'" />
+    <Reference Include="System.Data" Condition="'$(TargetFramework)' == 'net48'" />
+  </ItemGroup>
+</Project>

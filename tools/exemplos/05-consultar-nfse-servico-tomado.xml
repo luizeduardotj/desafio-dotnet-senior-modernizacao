@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <ConsultarNfseServicoTomadoRequest xmlns="http://notacarioca.rio.gov.br/">
+      <inputXML>&lt;ConsultarNfseServicoTomadoEnvio&gt;&lt;Consulente&gt;&lt;CpfCnpj&gt;&lt;Cnpj&gt;01234567000195&lt;/Cnpj&gt;&lt;/CpfCnpj&gt;&lt;/Consulente&gt;&lt;PeriodoEmissao&gt;&lt;DataInicial&gt;2026-10-01&lt;/DataInicial&gt;&lt;DataFinal&gt;2026-10-31&lt;/DataFinal&gt;&lt;/PeriodoEmissao&gt;&lt;Pagina&gt;1&lt;/Pagina&gt;&lt;/ConsultarNfseServicoTomadoEnvio&gt;</inputXML>
+    </ConsultarNfseServicoTomadoRequest>
+  </soap:Body>
+</soap:Envelope>

@@ -1,0 +1,487 @@
+diff --git a/src/Nfse.Consulta.Api/Domain/Nfse.cs b/src/Nfse.Consulta.Api/Domain/Nfse.cs
+new file mode 100644
+index 0000000..e67d9a2
+--- /dev/null
++++ b/src/Nfse.Consulta.Api/Domain/Nfse.cs
+@@ -0,0 +1,37 @@
++namespace Nfse.Consulta.Api.Domain;
++
++public class Nfse
++{
++    public long Id { get; set; }
++    public long PrestadorId { get; set; }
++    public long Numero { get; set; }
++    public string CodigoVerificacao { get; set; } = "";
++    public DateTime DtEmissao { get; set; }
++    public DateTime Competencia { get; set; }
++    public string ItemServico { get; set; } = "";
++    public string? Discriminacao { get; set; }
++    public decimal ValorServicos { get; set; }
++    public decimal ValorDeducoes { get; set; }
++    public decimal BaseCalculo { get; set; }
++    public decimal Aliquota { get; set; }
++    public decimal ValorIss { get; set; }
++    public string IssRetido { get; set; } = "N";
++    public string TomadorDocumento { get; set; } = "";
++    public string? TomadorRazao { get; set; }
++    public string Situacao { get; set; } = "N";
++    public DateTime? DtCancelamento { get; set; }
++    public string? MotivoCancelamento { get; set; }
++    public long? NfseSubstituidoraId { get; set; }
++    public long? RpsId { get; set; }
++}
++
++public record NfseResumoDto(
++    long PrestadorId,
++    long Numero,
++    DateTime DtEmissao,
++    string ItemServico,
++    decimal ValorServicos,
++    decimal ValorIss,
++    string Situacao);
++
++public record CancelamentoRequest(string Motivo);
+diff --git a/src/Nfse.Consulta.Api/Endpoints/NfseEndpoints.cs b/src/Nfse.Consulta.Api/Endpoints/NfseEndpoints.cs
+new file mode 100644
+index 0000000..8b5f13e
+--- /dev/null
++++ b/src/Nfse.Consulta.Api/Endpoints/NfseEndpoints.cs
+@@ -0,0 +1,91 @@
++using Nfse.Consulta.Api.Domain;
++using Nfse.Consulta.Api.Infra;
++
++namespace Nfse.Consulta.Api.Endpoints;
++
++public static class NfseEndpoints
++{
++    public static void MapNfseEndpoints(this WebApplication app)
++    {
++        var group = app.MapGroup("/api/v1");
++
++        group.MapGet("/nfse/{prestador:long}/{numero:long}", async (
++            long prestador, long numero, NfseRepository repo, ILogger<NfseRepository> logger) =>
++        {
++            logger.LogInformation($"Consultando NFS-e {numero} do prestador {prestador}");
++
++            var nfse = await repo.ObterPorNumeroAsync(prestador, numero).ConfigureAwait(false);
++
++            return Results.Ok(nfse);
++        });
++
++        group.MapGet("/tomadores/{documento}/nfse", (
++            string documento,
++            NfseRepository repo,
++            ILogger<NfseRepository> logger,
++            DateTime? inicio,
++            DateTime? fim,
++            string? situacao,
++            int pagina = 1,
++            int tamanho = 20) =>
++        {
++            logger.LogInformation($"Listando NFS-e do tomador {documento} - página {pagina}");
++
++            var ini = inicio ?? DateTime.Now.AddDays(-30);
++            var ate = fim ?? DateTime.Now;
++
++            var itens = repo.ListarPorTomadorAsync(documento, ini, ate, pagina, tamanho, situacao ?? "").Result;
++
++            return Results.Ok(new
++            {
++                pagina,
++                tamanho,
++                itens
++            });
++        });
++
++        group.MapPost("/nfse/{prestador:long}/{numero:long}/cancelamento", async (
++            long prestador, long numero, CancelamentoRequest body,
++            NfseRepository repo, ReceitaClient receita, ILogger<NfseRepository> logger) =>
++        {
++            try
++            {
++                var nfse = await repo.ObterPorNumeroAsync(prestador, numero);
++                if (nfse == null)
++                    return Results.NotFound("NFS-e não encontrada");
++
++                if (nfse.Situacao == "C")
++                    return Results.BadRequest("NFS-e já está cancelada");
++
++                // prazo: até dia 10 do mês seguinte à competência
++                var prazo = new DateTime(nfse.Competencia.Year, nfse.Competencia.Month, 10).AddMonths(1);
++                if (DateTime.Now.Date > prazo)
++                    return Results.BadRequest("Prazo de cancelamento expirado");
++
++                if (!await repo.PrestadorRegularAsync(prestador))
++                    return Results.UnprocessableEntity("Prestador não está regular perante a Receita");
++
++                await repo.CancelarAsync(prestador, numero, body.Motivo);
++
++                nfse.Situacao = "C";
++                nfse.DtCancelamento = DateTime.Now;
++                nfse.MotivoCancelamento = body.Motivo;
++
++                logger.LogInformation($"NFS-e {numero} cancelada. Tomador {nfse.TomadorDocumento}");
++                AtualizarCacheSituacao(receita, nfse.TomadorDocumento);
++
++                return Results.Ok(nfse);
++            }
++            catch (Exception ex)
++            {
++                logger.LogError($"Falha no cancelamento: {ex}");
++                return Results.Json(new { erro = ex.Message, detalhe = ex.StackTrace }, statusCode: 500);
++            }
++        });
++    }
++
++    private static async void AtualizarCacheSituacao(ReceitaClient receita, string documento)
++    {
++        await receita.ConsultarSituacaoAsync(documento, ignorarCache: true);
++    }
++}
+diff --git a/src/Nfse.Consulta.Api/Infra/NfseRepository.cs b/src/Nfse.Consulta.Api/Infra/NfseRepository.cs
+new file mode 100644
+index 0000000..3e1fd8f
+--- /dev/null
++++ b/src/Nfse.Consulta.Api/Infra/NfseRepository.cs
+@@ -0,0 +1,153 @@
++#nullable disable
++using System.Data;
++using Nfse.Consulta.Api.Domain;
++using Oracle.ManagedDataAccess.Client;
++
++namespace Nfse.Consulta.Api.Infra;
++
++public class NfseRepository
++{
++    private readonly OracleConnection _conn;
++    private readonly ReceitaClient _receita;
++    private readonly ILogger<NfseRepository> _logger;
++
++    public NfseRepository(IConfiguration config, ReceitaClient receita, ILogger<NfseRepository> logger)
++    {
++        _conn = new OracleConnection(config.GetConnectionString("Nfse"));
++        _receita = receita;
++        _logger = logger;
++    }
++
++    private async Task AbrirAsync()
++    {
++        if (_conn.State != ConnectionState.Open)
++            await _conn.OpenAsync();
++    }
++
++    public async Task<Domain.Nfse> ObterPorNumeroAsync(long prestadorId, long numero)
++    {
++        try
++        {
++            await AbrirAsync();
++
++            using var cmd = _conn.CreateCommand();
++            cmd.CommandText = "SELECT * FROM NFSE WHERE PRESTADOR_ID = :prestador AND NUMERO = :numero";
++            cmd.BindByName = true;
++            cmd.Parameters.Add("prestador", OracleDbType.Int64).Value = prestadorId;
++            cmd.Parameters.Add("numero", OracleDbType.Int64).Value = numero;
++
++            using var reader = await cmd.ExecuteReaderAsync();
++            if (!await reader.ReadAsync())
++                return null;
++
++            return Mapear(reader);
++        }
++        catch (Exception ex)
++        {
++            _logger.LogError($"Erro ao consultar NFS-e {numero}: {ex.Message}");
++            return null;
++        }
++    }
++
++    public async Task<List<NfseResumoDto>> ListarPorTomadorAsync(
++        string documento, DateTime inicio, DateTime fim, int pagina, int tamanho, string situacao)
++    {
++        var lista = new List<NfseResumoDto>();
++        await AbrirAsync();
++
++        var sql = "SELECT PRESTADOR_ID, NUMERO, DT_EMISSAO, ITEM_SERVICO, VALOR_SERVICOS, VALOR_ISS, SITUACAO " +
++                  "FROM NFSE WHERE TOMADOR_DOCUMENTO = :doc AND DT_EMISSAO BETWEEN :ini AND :fim";
++
++        if (!string.IsNullOrEmpty(situacao))
++            sql += $" AND SITUACAO = '{situacao}'";
++
++        sql += " ORDER BY DT_EMISSAO DESC OFFSET :off ROWS FETCH NEXT :tam ROWS ONLY";
++
++        using var cmd = _conn.CreateCommand();
++        cmd.CommandText = sql;
++        cmd.BindByName = true;
++        cmd.Parameters.Add("doc", OracleDbType.Int64).Value = long.Parse(documento);
++        cmd.Parameters.Add("ini", OracleDbType.Date).Value = inicio;
++        cmd.Parameters.Add("fim", OracleDbType.Date).Value = fim;
++        cmd.Parameters.Add("off", OracleDbType.Int32).Value = (pagina - 1) * tamanho;
++        cmd.Parameters.Add("tam", OracleDbType.Int32).Value = tamanho;
++
++        using var reader = await cmd.ExecuteReaderAsync();
++        while (await reader.ReadAsync())
++        {
++            lista.Add(new NfseResumoDto(
++                reader.GetInt64(0),
++                reader.GetInt64(1),
++                reader.GetDateTime(2),
++                reader.GetString(3),
++                reader.GetDecimal(4),
++                reader.GetDecimal(5),
++                reader.GetString(6)));
++        }
++
++        return lista;
++    }
++
++    public async Task<bool> PrestadorRegularAsync(long prestadorId)
++    {
++        await AbrirAsync();
++
++        using var cmd = _conn.CreateCommand();
++        cmd.CommandText = "SELECT DOCUMENTO, ATIVO FROM CONTRIBUINTES WHERE ID = :id";
++        cmd.BindByName = true;
++        cmd.Parameters.Add("id", OracleDbType.Int64).Value = prestadorId;
++
++        using var reader = await cmd.ExecuteReaderAsync();
++        if (!await reader.ReadAsync())
++            return false;
++
++        var documento = reader.GetString(0);
++        var ativo = reader.GetString(1) == "S";
++
++        var situacao = _receita.ConsultarSituacao(documento);
++        return ativo && situacao == "ATIVA";
++    }
++
++    public async Task CancelarAsync(long prestadorId, long numero, string motivo)
++    {
++        await AbrirAsync();
++
++        using var cmd = _conn.CreateCommand();
++        cmd.CommandText = "UPDATE NFSE SET SITUACAO = 'C', DT_CANCELAMENTO = SYSDATE, " +
++                          "MOTIVO_CANCELAMENTO = :motivo WHERE PRESTADOR_ID = :prestador AND NUMERO = :numero";
++        cmd.BindByName = true;
++        cmd.Parameters.Add("motivo", OracleDbType.Varchar2).Value = motivo;
++        cmd.Parameters.Add("prestador", OracleDbType.Int64).Value = prestadorId;
++        cmd.Parameters.Add("numero", OracleDbType.Int64).Value = numero;
++
++        await cmd.ExecuteNonQueryAsync();
++    }
++
++    private static Domain.Nfse Mapear(System.Data.Common.DbDataReader r)
++    {
++        return new Domain.Nfse
++        {
++            Id = Convert.ToInt64(r["ID"]),
++            PrestadorId = Convert.ToInt64(r["PRESTADOR_ID"]),
++            Numero = Convert.ToInt64(r["NUMERO"]),
++            CodigoVerificacao = r["CODIGO_VERIFICACAO"].ToString(),
++            DtEmissao = Convert.ToDateTime(r["DT_EMISSAO"]),
++            Competencia = Convert.ToDateTime(r["COMPETENCIA"]),
++            ItemServico = r["ITEM_SERVICO"].ToString(),
++            Discriminacao = r["DISCRIMINACAO"] as string,
++            ValorServicos = Convert.ToDecimal(r["VALOR_SERVICOS"]),
++            ValorDeducoes = Convert.ToDecimal(r["VALOR_DEDUCOES"]),
++            BaseCalculo = Convert.ToDecimal(r["BASE_CALCULO"]),
++            Aliquota = Convert.ToDecimal(r["ALIQUOTA"]),
++            ValorIss = Convert.ToDecimal(r["VALOR_ISS"]),
++            IssRetido = r["ISS_RETIDO"].ToString(),
++            TomadorDocumento = r["TOMADOR_DOCUMENTO"].ToString(),
++            TomadorRazao = r["TOMADOR_RAZAO"] as string,
++            Situacao = r["SITUACAO"].ToString(),
++            DtCancelamento = r["DT_CANCELAMENTO"] is DBNull ? null : Convert.ToDateTime(r["DT_CANCELAMENTO"]),
++            MotivoCancelamento = r["MOTIVO_CANCELAMENTO"] as string,
++            NfseSubstituidoraId = r["NFSE_SUBSTITUIDORA_ID"] is DBNull ? null : Convert.ToInt64(r["NFSE_SUBSTITUIDORA_ID"]),
++            RpsId = r["RPS_ID"] is DBNull ? null : Convert.ToInt64(r["RPS_ID"])
++        };
++    }
++}
+diff --git a/src/Nfse.Consulta.Api/Infra/ReceitaClient.cs b/src/Nfse.Consulta.Api/Infra/ReceitaClient.cs
+new file mode 100644
+index 0000000..83b749f
+--- /dev/null
++++ b/src/Nfse.Consulta.Api/Infra/ReceitaClient.cs
+@@ -0,0 +1,44 @@
++using System.Net.Http.Json;
++
++namespace Nfse.Consulta.Api.Infra;
++
++public class ReceitaClient
++{
++    private static readonly Dictionary<string, string> _cache = new();
++
++    private readonly string _baseUrl;
++    private readonly ILogger<ReceitaClient> _logger;
++
++    public ReceitaClient(IConfiguration config, ILogger<ReceitaClient> logger)
++    {
++        _baseUrl = config["Receita:BaseUrl"]!;
++        _logger = logger;
++    }
++
++    public async Task<string> ConsultarSituacaoAsync(string documento, bool ignorarCache = false)
++    {
++        if (!ignorarCache && _cache.TryGetValue(documento, out var emCache))
++            return emCache;
++
++        _logger.LogInformation($"Consultando situação cadastral do documento {documento}");
++
++        using var http = new HttpClient();
++        http.BaseAddress = new Uri(_baseUrl);
++
++        var resp = await http.GetAsync($"cnpj/{documento}/situacao").ConfigureAwait(false);
++        resp.EnsureSuccessStatusCode();
++
++        var dto = await resp.Content.ReadFromJsonAsync<SituacaoDto>().ConfigureAwait(false);
++        var situacao = dto!.Situacao;
++
++        _cache[documento] = situacao;
++        return situacao;
++    }
++
++    public string ConsultarSituacao(string documento)
++    {
++        return ConsultarSituacaoAsync(documento).Result;
++    }
++
++    private record SituacaoDto(string Situacao);
++}
+diff --git a/src/Nfse.Consulta.Api/Nfse.Consulta.Api.csproj b/src/Nfse.Consulta.Api/Nfse.Consulta.Api.csproj
+new file mode 100644
+index 0000000..5bd002e
+--- /dev/null
++++ b/src/Nfse.Consulta.Api/Nfse.Consulta.Api.csproj
+@@ -0,0 +1,14 @@
++<Project Sdk="Microsoft.NET.Sdk.Web">
++
++  <PropertyGroup>
++    <TargetFramework>net8.0</TargetFramework>
++    <Nullable>enable</Nullable>
++    <ImplicitUsings>enable</ImplicitUsings>
++    <RootNamespace>Nfse.Consulta.Api</RootNamespace>
++  </PropertyGroup>
++
++  <ItemGroup>
++    <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="3.21.140" />
++  </ItemGroup>
++
++</Project>
+diff --git a/src/Nfse.Consulta.Api/Program.cs b/src/Nfse.Consulta.Api/Program.cs
+new file mode 100644
+index 0000000..9cbc24b
+--- /dev/null
++++ b/src/Nfse.Consulta.Api/Program.cs
+@@ -0,0 +1,22 @@
++using Nfse.Consulta.Api.Endpoints;
++using Nfse.Consulta.Api.Infra;
++
++var builder = WebApplication.CreateBuilder(args);
++
++builder.Host.UseDefaultServiceProvider(o => o.ValidateScopes = false);
++
++builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
++
++builder.Services.AddScoped<ReceitaClient>();
++builder.Services.AddSingleton<NfseRepository>();
++
++var app = builder.Build();
++
++app.UseDeveloperExceptionPage();
++app.UseCors();
++
++app.MapNfseEndpoints();
++
++app.Run();
++
++public partial class Program { }
+diff --git a/src/Nfse.Consulta.Api/appsettings.json b/src/Nfse.Consulta.Api/appsettings.json
+new file mode 100644
+index 0000000..6146bcb
+--- /dev/null
++++ b/src/Nfse.Consulta.Api/appsettings.json
+@@ -0,0 +1,15 @@
++{
++  "ConnectionStrings": {
++    "Nfse": "User Id=NFSE_APP;Password=Nfse@2023!hml;Data Source=oradb-hml.prefeitura.rio:1521/NFSEHML;Connection Timeout=15"
++  },
++  "Receita": {
++    "BaseUrl": "https://api-receita.interno.prefeitura.rio/"
++  },
++  "Logging": {
++    "LogLevel": {
++      "Default": "Information",
++      "Microsoft.AspNetCore": "Warning"
++    }
++  },
++  "AllowedHosts": "*"
++}
+diff --git a/tests/Nfse.Consulta.Tests/Nfse.Consulta.Tests.csproj b/tests/Nfse.Consulta.Tests/Nfse.Consulta.Tests.csproj
+new file mode 100644
+index 0000000..e136de7
+--- /dev/null
++++ b/tests/Nfse.Consulta.Tests/Nfse.Consulta.Tests.csproj
+@@ -0,0 +1,21 @@
++<Project Sdk="Microsoft.NET.Sdk">
++
++  <PropertyGroup>
++    <TargetFramework>net8.0</TargetFramework>
++    <Nullable>enable</Nullable>
++    <ImplicitUsings>enable</ImplicitUsings>
++    <IsPackable>false</IsPackable>
++  </PropertyGroup>
++
++  <ItemGroup>
++    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.0" />
++    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
++    <PackageReference Include="xunit" Version="2.6.2" />
++    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.4" />
++  </ItemGroup>
++
++  <ItemGroup>
++    <ProjectReference Include="..\..\src\Nfse.Consulta.Api\Nfse.Consulta.Api.csproj" />
++  </ItemGroup>
++
++</Project>
+diff --git a/tests/Nfse.Consulta.Tests/NfseEndpointsTests.cs b/tests/Nfse.Consulta.Tests/NfseEndpointsTests.cs
+new file mode 100644
+index 0000000..e70897c
+--- /dev/null
++++ b/tests/Nfse.Consulta.Tests/NfseEndpointsTests.cs
+@@ -0,0 +1,36 @@
++using System.Net;
++using Microsoft.AspNetCore.Mvc.Testing;
++using Xunit;
++
++namespace Nfse.Consulta.Tests;
++
++public class NfseEndpointsTests : IClassFixture<WebApplicationFactory<Program>>
++{
++    private readonly WebApplicationFactory<Program> _factory;
++
++    public NfseEndpointsTests(WebApplicationFactory<Program> factory)
++    {
++        _factory = factory;
++    }
++
++    [Fact]
++    public async Task ConsultaNfse_DeveResponder()
++    {
++        var client = _factory.CreateClient();
++
++        var resp = await client.GetAsync("/api/v1/nfse/1001/42");
++        Thread.Sleep(500);
++
++        Assert.NotNull(resp);
++    }
++
++    [Fact]
++    public async Task ListaPorTomador_NaoDeveDarErroDeServidor()
++    {
++        var client = _factory.CreateClient();
++
++        var resp = await client.GetAsync("/api/v1/tomadores/12345678000195/nfse?pagina=1");
++
++        Assert.True(resp.StatusCode == HttpStatusCode.OK || resp.StatusCode == HttpStatusCode.InternalServerError);
++    }
++}
