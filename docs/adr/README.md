@@ -19,7 +19,7 @@ Não temos dados de produção do Nota Carioca. Para não confundir hipótese co
 
 ## Nível de verificação das premissas
 
-Até aqui, **todas as premissas vêm de leitura estática** do código e do PL/SQL; nada foi executado contra o Oracle. As ADRs 0002, 0003, 0005 e 0011 listam suas premissas com o nível atual (**lida no código**, **confirmada por teste**, **refutada**) e o teste que a confirma. Uma premissa só sobe de nível com teste no CI.
+As premissas começaram como leitura estática do código e do PL/SQL. O [spike de 2026-10-19](../spikes/2026-10-19-premissas-oracle.md) executou as principais no Oracle 23ai local (K07 e K08 confirmados); as de produção (19c) seguem pendentes com o DBA. As ADRs 0002, 0003, 0005 e 0011 listam suas premissas com o nível atual (**lida no código**, **confirmada por teste**, **refutada**) e o teste que a confirma. Uma premissa só sobe de nível com teste no CI.
 
 ## Índice
 

@@ -35,10 +35,10 @@ Restrições: mudanças no legado devem ser mínimas, justificadas em ADR e comp
 
 | # | Premissa | Fonte | Nível | Como confirmar | Se for falsa |
 | --- | --- | --- | --- | --- | --- |
-| P1 | O defeito existe (premissa P2 da ADR-0003) | inferência | lida (inferência) | teste K07 | esta ADR é arquivada |
+| P1 | O defeito existe (premissa P2 da ADR-0003) | inferência | **confirmada em execução** ([spike](../spikes/2026-10-19-premissas-oracle.md)) | teste K07 | esta ADR é arquivada |
 | P2 | Consultar `NFSE` no `AFTER STATEMENT` de um compound trigger não dispara `ORA-04091` | documentação Oracle 11g+ | lida | teste de integração do novo trigger | usar tabela temporária global como alternativa |
 | P3 | Segurar o lock de `GUIAS` até o commit não causa deadlock com o lote | — | hipótese | teste de carga lote + cancelamento na mesma competência | ordenar as operações ou manter o recálculo do lote fora da transação |
-| P4 | Não há notas com `COMPETENCIA` nula em produção | coluna nullable em `db/01_schema.sql:71` | desconhecida | consulta no 19c antes da aplicação | o novo trigger falha como o antigo (`ORA-01400`); tratar antes |
+| P4 | Não há notas com `COMPETENCIA` nula em produção | coluna nullable em `db/01_schema.sql:71` | **0 no seed**; produção desconhecida | consulta no 19c antes da aplicação | o novo trigger falha como o antigo (`ORA-01400`); tratar antes |
 
 ## Decisão proposta
 

@@ -28,15 +28,15 @@ Fatos (leitura de `db/03_pkg_nfse.sql:67-120`, `db/04_triggers.sql`, `db/02_pkg_
 
 | # | Premissa | Fonte | Nível | Como confirmar | Se for falsa |
 | --- | --- | --- | --- | --- | --- |
-| P1 | Ordem das regras `E050` → já cancelada → `E051` → `E052` → `E053` | `db/03_pkg_nfse.sql:77-112` | lida | golden master K02 | — |
-| P2 | O trigger autônomo não desconta a nota que está sendo cancelada (K07) | `db/04_triggers.sql:9-12` + semântica de transação autônoma | lida (inferência) | teste de integração K07: cancelar e ler a guia | a ADR-0005 perde o objeto; K07 sai do catálogo |
+| P1 | Ordem das regras `E050` → já cancelada → `E051` → `E052` → `E053` | `db/03_pkg_nfse.sql:77-112` | **confirmada** pelo golden master (casos 201–212) | golden master K02 | — |
+| P2 | O trigger autônomo não desconta a nota que está sendo cancelada (K07) | `db/04_triggers.sql:9-12` + semântica de transação autônoma | **confirmada em execução**: guia 1557,01 × correta 1267,86 ([spike](../spikes/2026-10-19-premissas-oracle.md)) | teste de integração K07: cancelar e ler a guia | a ADR-0005 perde o objeto; K07 sai do catálogo |
 | P3 | O `PRAGMA` existe para contornar `ORA-04091` | comentário de 2019 no trigger | hipótese | não precisa: não muda a decisão | — |
-| P4 | Dois cancelamentos simultâneos produzem dois `UPDATE` (K08) | `db/03_pkg_nfse.sql:78-119`, sem lock | lida (inferência) | teste de concorrência contra a procedure direta | o lock do wrapper continua inofensivo |
+| P4 | Dois cancelamentos simultâneos produzem dois `UPDATE` (K08) | `db/03_pkg_nfse.sql:78-119`, sem lock | **confirmada em execução**: motivo sobrescrito pela 2ª sessão ([spike](../spikes/2026-10-19-premissas-oracle.md)) | teste de concorrência contra a procedure direta | o lock do wrapper continua inofensivo |
 | P5 | O `COMMIT` autônomo persiste mesmo com rollback do chamador, inclusive criando guia | `db/02_pkg_guia.sql:29-31`, `db/04_triggers.sql:12` | lida (inferência) | teste: cancelar, `ROLLBACK`, contar guias | — |
 | P6 | `recalcular_guia` é idempotente | `db/02_pkg_guia.sql:16-31` | lida | chamar duas vezes e comparar `VALOR_ISS` | — |
-| P7 | A competência é sempre o dia 1 do mês | `ProcessadorLoteRps.cs:146`; seeds com `TRUNC(...,'MM')` | lida | `SELECT COUNT(*) FROM NFSE WHERE COMPETENCIA <> TRUNC(COMPETENCIA,'MM')` = 0 | a regra de prazo do domínio precisa replicar `ADD_MONTHS` sobre a data exata |
-| P8 | O `SYSDATE` de produção está em horário de São Paulo | `docker-compose.yml:5` (só o ambiente local) | **desconhecida para produção** | perguntar ao DBA do 19c (`SELECT DBTIMEZONE, SESSIONTIMEZONE`, fuso do SO) | o prazo do dia 10 já vira em outro horário hoje; preservar, documentar como K03 |
-| P9 | `SELECT ... FOR UPDATE` sobre tabela de outro schema funciona com `SELECT` direto ao dono do wrapper | documentação Oracle | lida | teste de integração do wrapper | grant de `LOCK` específico ou mover o lock para dentro de uma view com `SELECT` |
+| P7 | A competência é sempre o dia 1 do mês | `ProcessadorLoteRps.cs:146`; seeds com `TRUNC(...,'MM')` | **confirmada no seed**; produção a confirmar | `SELECT COUNT(*) FROM NFSE WHERE COMPETENCIA <> TRUNC(COMPETENCIA,'MM')` = 0 | a regra de prazo do domínio precisa replicar `ADD_MONTHS` sobre a data exata |
+| P8 | O `SYSDATE` de produção está em horário de São Paulo | `docker-compose.yml:5` (só o ambiente local) | local: segue o fuso do SO do container; **produção desconhecida** | perguntar ao DBA do 19c (`SELECT DBTIMEZONE, SESSIONTIMEZONE`, fuso do SO) | o prazo do dia 10 já vira em outro horário hoje; preservar, documentar como K03 |
+| P9 | `SELECT ... FOR UPDATE` sobre tabela de outro schema funciona com `SELECT` direto ao dono do wrapper | documentação Oracle | **confirmada** ([spike](../spikes/2026-10-19-premissas-oracle.md)) | teste de integração do wrapper | grant de `LOCK` específico ou mover o lock para dentro de uma view com `SELECT` |
 
 ## Decisão
 
@@ -63,7 +63,7 @@ BEGIN
            FOR UPDATE WAIT 5;                          -- serializa cancelamentos da mesma nota
     EXCEPTION
         WHEN NO_DATA_FOUND THEN o_codigo_erro := 'E050'; RETURN;   -- mesmo resultado que cancelar_nfse daria
-    END;                                               -- ORA-30006 (lock não obtido em 5 s) sobe como erro técnico
+    END;                                               -- lock não obtido em 5 s: ORA-30006 (19c) ou ORA-00054 (23ai), erro técnico
     SELECT SYSDATE INTO o_agora_banco FROM DUAL;
     SELECT COUNT(*) INTO o_guia_paga_antes FROM NFSE_OWNER.GUIAS
      WHERE PRESTADOR_ID = p_prestador_id AND COMPETENCIA = o_competencia AND SITUACAO = 'P';

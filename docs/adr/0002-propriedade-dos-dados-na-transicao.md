@@ -20,10 +20,10 @@
 
 | # | Premissa | Fonte | Nível | Como confirmar | Se for falsa |
 | --- | --- | --- | --- | --- | --- |
-| P1 | `READ` permite consultar mas não `SELECT ... FOR UPDATE`; `SELECT` permite | documentação Oracle 12c+ | lida | teste de grants no CI | dar `SELECT` também nas views ao dono; o runtime continua só com `READ` |
-| P2 | Repassar leitura de views a terceiros exige `WITH GRANT OPTION` na origem (`ORA-01720`) | documentação Oracle | lida | script de grants aplicado no container de teste | — |
-| P3 | Views e pacotes com definer rights ignoram privilégios recebidos por role | documentação Oracle | lida | teste com grant só por role falha | — |
-| P4 | Sem privilégio, `UPDATE` dá `ORA-00942` e chamada de pacote dá `PLS-00201` | documentação Oracle | lida | teste de grants | ajustar o código esperado no teste |
+| P1 | `READ` permite consultar mas não `SELECT ... FOR UPDATE`; `SELECT` permite | documentação Oracle 12c+ | **confirmada** em 23ai ([spike](../spikes/2026-10-19-premissas-oracle.md)); erro do 23ai é `ORA-41900`, do 19c `ORA-01031` | teste de grants no CI | dar `SELECT` também nas views ao dono; o runtime continua só com `READ` |
+| P2 | Repassar leitura de views a terceiros exige `WITH GRANT OPTION` na origem (`ORA-01720`) | documentação Oracle | **confirmada** ([spike](../spikes/2026-10-19-premissas-oracle.md)) | script de grants aplicado no container de teste | — |
+| P3 | Views e pacotes com definer rights ignoram privilégios recebidos por role | documentação Oracle | lida (grants aplicados só diretos; caso com role não testado) | teste com grant só por role falha | — |
+| P4 | Sem privilégio, `UPDATE` dá `ORA-00942` e chamada de pacote dá `PLS-00201` | documentação Oracle | **confirmada** ([spike](../spikes/2026-10-19-premissas-oracle.md)) | teste de grants | ajustar o código esperado no teste |
 | P5 | O ODP.NET faz autocommit fora de transação explícita (o lote grava `LOTES_RPS` sem `Commit` e funciona) | `LoteRepositorio.cs:10-27`; comportamento do provider | lida | `just lote` no ambiente local seguido de `ConsultarLoteRps` | o lote já estaria quebrado; não afeta o serviço novo, que sempre usa transação explícita |
 | P6 | Ler o mesmo Oracle não degrada o processamento de lote | — | hipótese | teste de carga com lote e consultas concorrentes (M0 do plano) | antecipar read model ou réplica de leitura |
 

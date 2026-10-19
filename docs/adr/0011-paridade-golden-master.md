@@ -24,10 +24,10 @@ Obstáculos ao determinismo:
 
 | # | Premissa | Fonte | Nível | Como confirmar | Se for falsa |
 | --- | --- | --- | --- | --- | --- |
-| P1 | `FIXED_DATE` congela `SYSDATE` (não `SYSTIMESTAMP`) | documentação Oracle | lida | spike: `SELECT SYSDATE` após o `ALTER SYSTEM` | plano B descrito abaixo |
-| P2 | `FIXED_DATE` tem efeito dentro do PDB `FREEPDB1` | — | **desconhecida** | spike no primeiro dia | definir no CDB, ou plano B |
+| P1 | `FIXED_DATE` congela `SYSDATE` (não `SYSTIMESTAMP`) | documentação Oracle | **confirmada** ([spike](../spikes/2026-10-19-premissas-oracle.md)) | spike: `SELECT SYSDATE` após o `ALTER SYSTEM` | plano B descrito abaixo |
+| P2 | `FIXED_DATE` tem efeito dentro do PDB `FREEPDB1` | — | **confirmada** ([spike](../spikes/2026-10-19-premissas-oracle.md)) | spike no primeiro dia | definir no CDB, ou plano B |
 | P3 | Com `FIXED_DATE`, o seed `01`–`05` é determinístico | `db/05_seed_base.sql:44` é a única leitura de relógio; não usa `DBMS_RANDOM` | lida | carregar duas vezes e comparar `NFSE` e `GUIAS` | normalizar campos no golden master |
-| P4 | Uma imagem com o seed já aplicado pode ser criada e reutilizada no CI | imagem `gvenzl/oracle-free` | hipótese | spike: `docker commit` após o init, ou volume pré-carregado | carregar o seed a cada job (mais lento, sem o volume de 2 milhões) |
+| P4 | Uma imagem com o seed já aplicado pode ser criada e reutilizada no CI | imagem `gvenzl/oracle-free` | **parcial**: cópia do volume funciona; restauração não exercitada | spike: `docker commit` após o init, ou volume pré-carregado | carregar o seed a cada job (mais lento, sem o volume de 2 milhões) |
 
 ## Decisão
 
