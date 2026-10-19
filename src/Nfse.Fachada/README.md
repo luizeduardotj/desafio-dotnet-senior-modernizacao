@@ -87,9 +87,9 @@ curl           -H "X-Admin-Token: $TOKEN" http://fachada:8081/admin/kill-switch 
 | Métrica | Labels | O que mede |
 | --- | --- | --- |
 | `nfse_requisicoes_total` | `operacao`, `modo`, `destino`, `resultado` | uma por requisição SOAP; `destino` é quem respondeu, depois de um eventual fallback |
-| `nfse_duracao_segundos` | `operacao`, `destino` | cada chamada ao legado ou ao novo |
+| `nfse_duracao` | `operacao`, `destino` | cada chamada ao legado ou ao novo |
 | `nfse_fallback_total` | `operacao`, `causa` | idas ao legado depois de falha no novo |
-| `fachada_overhead_segundos` | `operacao` | tempo da requisição SOAP fora das chamadas aos destinos (orçamento da ADR-0008); inclui a leitura do corpo bufferizado |
+| `fachada_overhead` | `operacao` | tempo da requisição SOAP fora das chamadas aos destinos (orçamento da ADR-0008); inclui a leitura do corpo bufferizado |
 | `migracao_modo_info` (gauge) | `operacao`, `modo`, `percentual` | modo configurado por operação ([`MedidoresDeEstado`](Observabilidade/MedidoresDeEstado.cs)) |
 | `kill_switch_ativo` (gauge) | — | 1 se algum kill switch, do arquivo ou administrativo, está ligado |
 
@@ -99,13 +99,13 @@ curl           -H "X-Admin-Token: $TOKEN" http://fachada:8081/admin/kill-switch 
 - Nenhuma IM ou documento vira label.
 - O cliente HTTP propaga `traceparent`.
 - Os histogramas usam buckets em segundos (o padrão do SDK pressupõe milissegundos).
-- No Prometheus, o OTLP acrescenta o sufixo da unidade aos histogramas: `nfse_duracao_segundos_seconds_bucket` e `fachada_overhead_segundos_seconds_bucket`. Os contadores e os gauges ficam com o nome da ADR.
+- No Prometheus, o OTLP acrescenta o sufixo da unidade aos histogramas: `nfse_duracao_seconds_bucket` e `fachada_overhead_seconds_bucket`. Os contadores e os gauges ficam com o nome da ADR.
 - No compose, o dashboard **Migração por operação** fica no Grafana do `otel-lgtm` (pasta NFS-e), provisionado de [`deploy/grafana`](../../deploy/grafana).
 
 ## TODO
 
 - [ ] **OpenFeature + flagd** (ADR-0008): implementar `IFonteDeFlags` sobre `OpenFeature` com o provider flagd (sync por watch). Ficam valendo o mesmo retrato `FlagsDeMigracao`, o fail-safe para `null` e o atributo no span a cada avaliação. Hoje a fonte é `FonteDeFlagsPorConfiguracao` (arquivo observado).
-- [x] **OpenTelemetry** (ADR-0012): tracing, métricas e logs exportados por OTLP, `fachada_overhead_segundos`, span filho da chamada ao destino (instrumentação do HttpClient) e os gauges `migracao_modo_info` e `kill_switch_ativo`.
+- [x] **OpenTelemetry** (ADR-0012): tracing, métricas e logs exportados por OTLP, `fachada_overhead`, span filho da chamada ao destino (instrumentação do HttpClient) e os gauges `migracao_modo_info` e `kill_switch_ativo`.
 - [ ] Resultado `erro_negocio` (resposta 200 com `ListaMensagemRetorno`): exige ler o corpo da resposta, junto da sombra.
 - [ ] Pseudonimização (HMAC) de documentos e IMs num processador de logs (ADR-0012). Hoje nenhum log da fachada recebe esses dados; o processador vale como defesa para logs novos.
 - [ ] **Sombra** (ADR-0009): usar `Decisao.ElegivelParaSombra` mais a amostragem sorteada depois da resposta do legado. A cópia vai a um canal limitado e o novo é chamado fora do caminho da resposta.

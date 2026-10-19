@@ -65,9 +65,9 @@ public sealed class TelemetriaTests : IAsyncLifetime, IDisposable
         AssertContem("nfse_requisicoes_total", ("operacao", "ConsultarNfseServicoTomado"), ("modo", "novo"), ("destino", "legado"), ("resultado", "ok"));
         AssertContem("nfse_requisicoes_total", ("operacao", "RecepcionarLoteRps"), ("modo", "legado"), ("destino", "legado"), ("resultado", "ok"));
         AssertContem("nfse_fallback_total", ("operacao", "ConsultarNfseServicoTomado"), ("causa", "http_503"));
-        AssertContem("nfse_duracao_segundos", ("operacao", "ConsultarNfseServicoTomado"), ("destino", "novo"));
-        AssertContem("nfse_duracao_segundos", ("operacao", "ConsultarNfseServicoTomado"), ("destino", "legado"));
-        AssertContem("nfse_duracao_segundos", ("operacao", "RecepcionarLoteRps"), ("destino", "legado"));
+        AssertContem("nfse_duracao", ("operacao", "ConsultarNfseServicoTomado"), ("destino", "novo"));
+        AssertContem("nfse_duracao", ("operacao", "ConsultarNfseServicoTomado"), ("destino", "legado"));
+        AssertContem("nfse_duracao", ("operacao", "RecepcionarLoteRps"), ("destino", "legado"));
         Assert.DoesNotContain(_medicoes, m => m.Instrumento == "nfse_fallback_total" && m.Tags["operacao"] == "CancelarNfse");
     }
 
@@ -79,9 +79,9 @@ public sealed class TelemetriaTests : IAsyncLifetime, IDisposable
         (await fachada.EnviarSoapAsync(OperacoesSoap.CancelarNfse, Exemplos.Bytes("06-cancelar-nfse.xml"))).Dispose();
         (await fachada.EnviarSoapAsync("RecepcionarLoteRps", Exemplos.Bytes("01-recepcionar-lote-rps.xml"))).Dispose();
 
-        AssertContem("fachada_overhead_segundos", ("operacao", "CancelarNfse"));
-        AssertContem("fachada_overhead_segundos", ("operacao", "RecepcionarLoteRps"));
-        Assert.All(_medicoes.Where(m => m.Instrumento == "fachada_overhead_segundos"), m =>
+        AssertContem("fachada_overhead", ("operacao", "CancelarNfse"));
+        AssertContem("fachada_overhead", ("operacao", "RecepcionarLoteRps"));
+        Assert.All(_medicoes.Where(m => m.Instrumento == "fachada_overhead"), m =>
         {
             Assert.InRange(m.Valor, 0, 5);
             Assert.Equal(["operacao"], m.Tags.Keys);

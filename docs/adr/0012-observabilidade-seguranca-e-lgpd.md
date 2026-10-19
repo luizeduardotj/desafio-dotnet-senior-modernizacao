@@ -31,8 +31,8 @@ Os dados trafegados incluem CPF de pessoas físicas (tomadores) e razão social;
 | Métrica | Labels | Uso |
 | --- | --- | --- |
 | `nfse_requisicoes_total` | `operacao`, `modo`, `destino`, `resultado` (`ok`, `erro_negocio`, `fault`) | volume e taxa de erro por lado |
-| `nfse_duracao_segundos` (histograma) | `operacao`, `destino` | p50/p95/p99 legado × novo |
-| `fachada_overhead_segundos` (histograma) | `operacao` | orçamento da fachada ([ADR-0008](0008-fachada-yarp-roteamento-e-flags.md)) |
+| `nfse_duracao` (histograma, unidade `s`; `nfse_duracao_seconds` no Prometheus) | `operacao`, `destino` | p50/p95/p99 legado × novo |
+| `fachada_overhead` (histograma, unidade `s`; `fachada_overhead_seconds` no Prometheus) | `operacao` | orçamento da fachada ([ADR-0008](0008-fachada-yarp-roteamento-e-flags.md)) |
 | `nfse_fallback_total` | `operacao`, `causa` | fragilidade do novo |
 | `sombra_comparacoes_total` | `operacao`, `resultado` (`igual`, `divergente`) | taxa de paridade |
 | `sombra_divergencias_total` | `operacao`, `classe` | critério de avanço |

@@ -26,11 +26,11 @@ public static class Telemetria
         "nfse_requisicoes_total", description: "Requisições SOAP por operação, modo, destino que respondeu e resultado.");
 
     private static readonly Histogram<double> Duracao = Medidor.CreateHistogram<double>(
-        "nfse_duracao_segundos", unit: "s", description: "Duração da chamada a cada destino, vista pela fachada.",
+        "nfse_duracao", unit: "s", description: "Duração da chamada a cada destino, vista pela fachada.",
         advice: new InstrumentAdvice<double> { HistogramBucketBoundaries = BucketsDeDuracao });
 
     private static readonly Histogram<double> Overhead = Medidor.CreateHistogram<double>(
-        "fachada_overhead_segundos", unit: "s",
+        "fachada_overhead", unit: "s",
         description: "Tempo da requisição SOAP gasto na própria fachada (total menos as chamadas aos destinos).",
         advice: new InstrumentAdvice<double> { HistogramBucketBoundaries = [0.0005, 0.001, 0.0025, 0.005, 0.0075, 0.01, 0.025, 0.05, 0.1, 0.25] });
 

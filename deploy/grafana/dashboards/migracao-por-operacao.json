@@ -349,7 +349,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "p99 por destino",
-      "description": "nfse_duracao_segundos (no Prometheus, nfse_duracao_segundos_seconds: o OTLP acrescenta o sufixo da unidade s). Critério de rollback: p99 do novo > 1,2 × p99 do legado por 15 min (ADR-0012).",
+      "description": "nfse_duracao, unidade s (no Prometheus, nfse_duracao_seconds). Critério de rollback: p99 do novo > 1,2 × p99 do legado por 15 min (ADR-0012).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -391,7 +391,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, sum by (le, operacao, destino) (rate(nfse_duracao_segundos_seconds_bucket{operacao=~\"$operacao\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, operacao, destino) (rate(nfse_duracao_seconds_bucket{operacao=~\"$operacao\"}[$__rate_interval])))",
           "legendFormat": "{{operacao}} · {{destino}}",
           "datasource": {
             "type": "prometheus",
@@ -519,7 +519,7 @@
       "id": 9,
       "type": "timeseries",
       "title": "Overhead da fachada (p99)",
-      "description": "fachada_overhead_segundos (no Prometheus, fachada_overhead_segundos_seconds). Orçamento: ≤ 5 ms fora do escopo e ≤ 10 ms em escopo no p99 (ADR-0008).",
+      "description": "fachada_overhead, unidade s (no Prometheus, fachada_overhead_seconds). Orçamento: ≤ 5 ms fora do escopo e ≤ 10 ms em escopo no p99 (ADR-0008).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -561,7 +561,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, sum by (le, operacao) (rate(fachada_overhead_segundos_seconds_bucket{operacao=~\"$operacao\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, operacao) (rate(fachada_overhead_seconds_bucket{operacao=~\"$operacao\"}[$__rate_interval])))",
           "legendFormat": "{{operacao}}",
           "datasource": {
             "type": "prometheus",
