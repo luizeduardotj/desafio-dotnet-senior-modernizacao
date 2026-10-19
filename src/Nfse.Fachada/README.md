@@ -2,7 +2,7 @@
 
 Proxy north-south na frente de `/NfseWS.asmx` ([ADR-0008](../../docs/adr/0008-fachada-yarp-roteamento-e-flags.md)). Decide, por operação, entre o legado e o serviço novo. Não tem regra de NFS-e, nem banco, nem estado além do kill switch administrativo da réplica.
 
-Estado atual: **M0** do [plano](../../docs/plano-de-migracao.md). As flags de [`flags.json`](flags.json) deixam as três operações em `legado`. A decisão de destino está pronta e testada; a sombra ainda não existe.
+Estado atual: **M0** do [plano](../../docs/plano-de-migracao.md). As flags de [`flags.json`](flags.json) deixam as três operações em `legado`. A decisão de destino está pronta e testada, e a sombra das leituras também ([Sombra](#sombra)); a do cancelamento ainda não existe.
 
 ## Fluxo
 
@@ -23,6 +23,54 @@ Falha no novo:
 - **Leitura:** erro de transporte ou de conexão, timeout, ou HTTP 502, 503 ou 504 levam a **uma** tentativa no legado. Um HTTP 500 do novo vai ao cliente como veio: é o `soap:Fault` que o novo devolve de propósito, como o legado (C20). Repeti-lo levaria a requisição duas vezes ao Oracle e poluiria a métrica de fallback.
 - **`CancelarNfse`:** sem retry e sem fallback. A exceção é falha ao abrir a conexão (`ConnectionError`/`NameResolutionError`), porque aí o corpo não saiu. Timeout ou erro depois do envio devolvem o mesmo `soap:Fault` `soap:Server` do legado.
 
+## Sombra
+
+Implementa as seções 1, 2 e 4 da [ADR-0009](../../docs/adr/0009-sombra-escrita-unica-e-idempotencia.md) para `ConsultarNfse` e `ConsultarNfseServicoTomado`. O código fica em [`Sombra/`](Sombra).
+
+**`CancelarNfse` nunca é copiado**, nem em `sombra` com amostragem 100 e resposta rara. Executá-lo no novo cancelaria duas vezes. A sombra do cancelamento é a avaliação sem escrita da ADR-0009, seção 3, e é outra etapa.
+
+```mermaid
+sequenceDiagram
+    participant E as ERP
+    participant F as Fachada
+    participant L as Legado
+    participant W as Worker da sombra
+    participant N as Serviço novo
+    E->>F: ConsultarNfse (T0)
+    F->>L: encaminha (YARP)
+    L-->>F: resposta
+    F-->>E: resposta do legado (tee copia o corpo, até 1 MiB)
+    F->>F: amostra? (chave rara ou sorteio) → canal limitado
+    W->>N: mesmo POST /NfseWS.asmx e SOAPAction (cliente HTTP próprio)
+    N-->>W: resposta
+    W->>W: compara bytes e status; divergiu → reexecuta legado e novo uma vez → classifica
+```
+
+1. **Caminho do cliente.** Em `sombra`, com `Decisao.ElegivelParaSombra`, `Novo__Url` configurada e corpo bufferizado, o corpo da resposta do legado passa por um tee ([`CapturaDaResposta`](Sombra/CapturaDaResposta.cs)). Cada bloco vai primeiro ao cliente e só depois é copiado. A cópia para em 1 MiB, mas o cliente continua recebendo tudo.
+2. **Amostragem.** É decidida depois da resposta. Uma resposta em chave rara (`Sombra__ChavesRaras`, padrão `E001`, `E030`, `E050`, `E051` e `E053`) vai sempre, mesmo com amostragem 0. Fora disso, vai uma fração `Sombra.Amostragem` (0..100) da operação. O código é lido do `outputXML` do legado. O parsing só acontece se a resposta contiver `ListaMensagemRetorno`, e uma página de notas não chega a ser parseada.
+3. **Canal.** A cópia leva a requisição, a resposta, o status, `T0` e o contexto do trace, e vai para um `Channel` limitado. Com o canal cheio, a cópia é descartada (`canal_cheio`) e a publicação não bloqueia. Também são descartadas, depois do sorteio, a resposta acima de 1 MiB (`resposta_grande`), a requisição acima de 1 MiB (`requisicao_grande`) e a falha ao encaminhar ao legado (`falha_legado`).
+4. **Workers.** São `Sombra__Concorrencia` consumidores, num `BackgroundService` ([`TrabalhadorDaSombra`](Sombra/TrabalhadorDaSombra.cs)), com um cliente HTTP só da sombra ([`ClientesDaSombra`](Sombra/ClientesDaSombra.cs)). Cada chamada tem o timeout `Sombra__Timeout`. O trace de cada cópia é próprio e tem span link para o da requisição original.
+5. **Comparação.** São comparados os bytes do corpo e o status. Na divergência, a classificação ([`ClassificadorDeDivergencia`](Sombra/ClassificadorDeDivergencia.cs)) segue esta ordem:
+
+| Condição | Classe |
+| --- | --- |
+| timeout ou erro de transporte do novo | `erro_novo` (não conta como comparação) |
+| os dois devolvem `soap:Fault` `soap:Server`, com textos diferentes | `decisao_consciente`, regra **C20** |
+| novo com status 5xx | `erro_novo` |
+| pedido com `<!DOCTYPE` (no envelope ou escapado no `inputXML`) | `decisao_consciente`, regra **C28** |
+| reexecução de legado e novo, em paralelo, coincide | `corrida` |
+| reexecução diverge, falha ou passa do limite (`Sombra__ReexecucoesPorSegundo`, por operação) | `nao_classificada` |
+
+**Registro da divergência.** É um log `Warning` (evento 21), nunca gravado no Oracle. Leva operação, classe, regra, `traceId` da requisição original, status dos dois lados, SHA-256 de cada resposta, até 10 caminhos XPath divergentes do `outputXML` ([`DiferencaXml`](Sombra/DiferencaXml.cs), que usa o envelope quando não há `outputXML`, como num Fault) e a requisição pseudonimizada ([`Pseudonimizador`](Sombra/Pseudonimizador.cs)).
+
+**Pseudonimização.** Cada valor do `inputXML` vira `hmac:` seguido do HMAC-SHA256 em hexadecimal, com a chave `Sombra__ChaveHmac`. A regra é uma lista de permissão: só `Numero`, `NumeroNfse`, `DataInicial`, `DataFinal` e `Pagina` ficam em claro. CPF/CNPJ, razões sociais, IM e qualquer outro campo saem pseudonimizados.
+
+- Sem chave, ou com pedido malformado (por exemplo, com DTD), a requisição aparece como `omitida` e o registro leva só os hashes.
+- As respostas nunca entram no log.
+- O "igual" e os descartes saem em `Debug`.
+
+**Limitações.** A classificação por regra só olha o protocolo (Fault, DTD). As classes de negócio do cancelamento (`fronteira_relogio`, `indeterminado`) são do serviço novo (ADR-0008). Ainda não há unidade de amostra por (chave, operação, resposta, dia) nem acúmulo estatístico (plano, §5.2 e §5.3): isso fica na análise das métricas e dos logs. O sorteio da amostragem é por requisição, não por chave.
+
 ## Configuração
 
 | Chave (env) | Padrão | |
@@ -35,6 +83,12 @@ Falha no novo:
 | `Fachada__ArquivoDeFlags` | `flags.json` | caminho relativo ao content root, ou absoluto |
 | `Admin__Porta` | `8081` | porta interna dos endpoints administrativos |
 | `Admin__Token` | — | segredo do header `X-Admin-Token`; vazio fecha os endpoints |
+| `Sombra__CapacidadeDoCanal` | `1000` | cópias aguardando worker; lido na partida |
+| `Sombra__Concorrencia` | `4` | workers da sombra; lido na partida |
+| `Sombra__Timeout` | `00:00:05` | duração máxima de cada chamada da sombra (novo e reexecução do legado) |
+| `Sombra__ReexecucoesPorSegundo` | `1` | reexecuções de divergência por segundo, por operação; `0` desliga |
+| `Sombra__ChavesRaras__0`, `__1`, ... | `E001`, `E030`, `E050`, `E051`, `E053` | códigos que vão sempre para a sombra |
+| `Sombra__ChaveHmac` | — | segredo do HMAC da pseudonimização; vazio, o registro leva só os hashes |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | coletor OTLP (no compose, `http://otel-lgtm:4317`); sem ela, nada é exportado |
 
 ## Flags
@@ -60,7 +114,7 @@ Seção `Migracao` do arquivo de flags. O arquivo é observado e recarregado sem
 ```
 
 - Uma operação ausente fica em `legado`.
-- `Percentual` só vale em `novo`. `Sombra.Amostragem` ainda não é usada.
+- `Percentual` só vale em `novo`. `Sombra.Amostragem` só vale em `sombra`, e só nas leituras.
 - As listas contêm IMs (ou documentos só com dígitos, em `ConsultarNfseServicoTomado`).
 - **Fail-safe:** com arquivo ausente, JSON inválido, valor que não converte (`"Modo": "talvez"`) ou percentual fora de 0..100, a fonte devolve `null`. Nesse caso tudo vai ao legado e `/health/ready` responde 503.
 
@@ -92,6 +146,11 @@ curl           -H "X-Admin-Token: $TOKEN" http://fachada:8081/admin/kill-switch 
 | `fachada_overhead` | `operacao` | tempo da requisição SOAP fora das chamadas aos destinos (orçamento da ADR-0008); inclui a leitura do corpo bufferizado |
 | `migracao_modo_info` (gauge) | `operacao`, `modo`, `percentual` | modo configurado por operação ([`MedidoresDeEstado`](Observabilidade/MedidoresDeEstado.cs)) |
 | `kill_switch_ativo` (gauge) | — | 1 se algum kill switch, do arquivo ou administrativo, está ligado |
+| `sombra_comparacoes_total` | `operacao`, `resultado` (`igual`, `divergente`) | comparações em bytes de corpo e status |
+| `sombra_divergencias_total` | `operacao`, `classe` | divergências e falhas do novo, por classe automática |
+| `sombra_descartadas_total` | `operacao`, `motivo` | cópias amostradas e não comparadas (`canal_cheio`, `resposta_grande`, `requisicao_grande`, `falha_legado`) |
+| `sombra_reexecucoes_total` | `operacao`, `resultado` (`coincidiu`, `divergiu`, `erro`, `limitada`) | custo da reexecução |
+| `sombra_atraso` | `operacao` | de `T0` ao fim da comparação |
 
 - `modo` vale `legado`, `sombra`, `novo` ou `indisponivel` (flags não lidas). Operação fora do escopo conta como `legado` e operação desconhecida aparece como `desconhecida`.
 - `resultado` vale `ok` (2xx) ou `fault` (o resto). `erro_negocio` ainda não existe, porque exige ler o corpo da resposta (ver TODO).
@@ -99,15 +158,18 @@ curl           -H "X-Admin-Token: $TOKEN" http://fachada:8081/admin/kill-switch 
 - Nenhuma IM ou documento vira label.
 - O cliente HTTP propaga `traceparent`.
 - Os histogramas usam buckets em segundos (o padrão do SDK pressupõe milissegundos).
-- No Prometheus, o OTLP acrescenta o sufixo da unidade aos histogramas: `nfse_duracao_seconds_bucket` e `fachada_overhead_seconds_bucket`. Os contadores e os gauges ficam com o nome da ADR.
-- No compose, o dashboard **Migração por operação** fica no Grafana do `otel-lgtm` (pasta NFS-e), provisionado de [`deploy/grafana`](../../deploy/grafana).
+- No Prometheus, o OTLP acrescenta o sufixo da unidade aos histogramas: `nfse_duracao_seconds_bucket`, `fachada_overhead_seconds_bucket` e `sombra_atraso_seconds_bucket`. Os contadores e os gauges ficam com o nome da ADR.
+- No compose, o dashboard **Migração por operação** fica no Grafana do `otel-lgtm` (pasta NFS-e), provisionado de [`deploy/grafana`](../../deploy/grafana). A linha **Sombra** mostra a taxa de divergência por classe, as comparações e reexecuções, os descartes por motivo e o atraso p99.
 
 ## TODO
 
 - [ ] **OpenFeature + flagd** (ADR-0008): implementar `IFonteDeFlags` sobre `OpenFeature` com o provider flagd (sync por watch). Ficam valendo o mesmo retrato `FlagsDeMigracao`, o fail-safe para `null` e o atributo no span a cada avaliação. Hoje a fonte é `FonteDeFlagsPorConfiguracao` (arquivo observado).
 - [x] **OpenTelemetry** (ADR-0012): tracing, métricas e logs exportados por OTLP, `fachada_overhead`, span filho da chamada ao destino (instrumentação do HttpClient) e os gauges `migracao_modo_info` e `kill_switch_ativo`.
-- [ ] Resultado `erro_negocio` (resposta 200 com `ListaMensagemRetorno`): exige ler o corpo da resposta, junto da sombra.
-- [ ] Pseudonimização (HMAC) de documentos e IMs num processador de logs (ADR-0012). Hoje nenhum log da fachada recebe esses dados; o processador vale como defesa para logs novos.
-- [ ] **Sombra** (ADR-0009): usar `Decisao.ElegivelParaSombra` mais a amostragem sorteada depois da resposta do legado. A cópia vai a um canal limitado e o novo é chamado fora do caminho da resposta.
+- [ ] Resultado `erro_negocio` (resposta 200 com `ListaMensagemRetorno`): a sombra já captura o corpo e lê os códigos (`XmlSoap.CodigosDeRetorno`), mas só nas operações em `sombra`.
+- [ ] Pseudonimização (HMAC) de documentos e IMs num processador de logs (ADR-0012). A sombra já pseudonimiza o pedido no registro da divergência; o processador vale como defesa para logs novos.
+- [x] **Sombra das leituras** (ADR-0009, seções 1, 2 e 4).
+- [ ] **Sombra do cancelamento** (ADR-0009, seção 3): enviar requisição, resposta e `T0` ao `POST /interno/sombra/cancelamento` do novo, que avalia sem escrever.
+- [ ] Janela do prazo como chave rara (plano, §5.4), junto da sombra do cancelamento.
+- [ ] Payload cifrado (AES-GCM) para reprodução exata (ADR-0009, fase 2).
 - [ ] Timeout total (não só de inatividade) por operação no novo, se a medição do M0 mostrar necessidade.
 - [x] [Dockerfile](Dockerfile) e serviço `fachada` no [`docker-compose.yml`](../../docker-compose.yml), com as flags montadas de [`deploy/flags`](../../deploy/flags/flags.json).

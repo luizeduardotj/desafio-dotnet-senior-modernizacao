@@ -139,7 +139,7 @@ public sealed class TelemetriaTests : IAsyncLifetime, IDisposable
 
         (await fachada.EnviarSoapAsync("x", [], "\"http://notacarioca.rio.gov.br/10000001\"")).Dispose();
 
-        string[] permitidas = ["operacao", "modo", "destino", "resultado", "causa"];
+        string[] permitidas = ["operacao", "modo", "destino", "resultado", "causa", "classe", "motivo"];
         Assert.NotEmpty(_medicoes);
         Assert.All(_medicoes, m => Assert.All(m.Tags.Keys, chave => Assert.Contains(chave, permitidas)));
         Assert.DoesNotContain(_medicoes, m => m.Instrumento == "fachada_roteamento_total");
@@ -149,6 +149,37 @@ public sealed class TelemetriaTests : IAsyncLifetime, IDisposable
         }
 
         AssertContem("nfse_requisicoes_total", ("operacao", "desconhecida"));
+    }
+
+    [Fact]
+    public async Task Sombra_com_os_nomes_e_labels_da_ADR_0012()
+    {
+        await using ServidorFalso novo = await ServidorFalso.IniciarAsync();
+        byte[] grande = new byte[(1024 * 1024) + 1];
+        _legado.Responder = (ctx, req) => SombraTests.Responder(req.Corpo.AsSpan().IndexOf("Tomador"u8) >= 0
+            ? grande
+            : Exemplos.Bytes("04-consultar-nfse.resposta.xml"))(ctx, req);
+        novo.Responder = (ctx, req) => SombraTests.Responder(req.SoapAction.Contains("Tomado", StringComparison.Ordinal)
+            ? Exemplos.Bytes("05-consultar-nfse-servico-tomado.resposta.xml")
+            : Exemplos.Bytes("04-consultar-nfse.resposta.xml"))(ctx, req);
+        await using var fachada = new FabricaDaFachada(
+            _legado.CriarHandler(), novo.CriarHandler(), new FlagsFixas(SombraTests.Flags(100)),
+            new Dictionary<string, string?> { ["Sombra:ReexecucoesPorSegundo"] = "1000" });
+
+        (await fachada.EnviarSoapAsync(OperacoesSoap.ConsultarNfse, Exemplos.Bytes("04-consultar-nfse.xml"))).Dispose();
+        (await fachada.EnviarSoapAsync(OperacoesSoap.ConsultarNfseServicoTomado, Exemplos.Bytes("05-consultar-nfse-servico-tomado.xml"))).Dispose();
+
+        (await fachada.EnviarSoapAsync(OperacoesSoap.ConsultarNfse, Exemplos.Bytes("04e-consultar-nfse-por-tomador.xml"))).Dispose();
+
+        await SombraTests.Eventualmente(() => _medicoes.Count(m => m.Instrumento == "sombra_atraso") >= 2);
+        AssertContem("sombra_comparacoes_total", ("operacao", "ConsultarNfse"), ("resultado", "igual"));
+        AssertContem("sombra_comparacoes_total", ("operacao", "ConsultarNfseServicoTomado"), ("resultado", "divergente"));
+        AssertContem("sombra_divergencias_total", ("operacao", "ConsultarNfseServicoTomado"), ("classe", "nao_classificada"));
+        AssertContem("sombra_reexecucoes_total", ("operacao", "ConsultarNfseServicoTomado"), ("resultado", "divergiu"));
+        AssertContem("sombra_atraso", ("operacao", "ConsultarNfse"));
+        AssertContem("sombra_descartadas_total", ("operacao", "ConsultarNfse"), ("motivo", "resposta_grande"));
+        Assert.All(_medicoes.Where(m => m.Instrumento == "sombra_atraso"), m => Assert.InRange(m.Valor, 0, 10));
+        Assert.DoesNotContain(_medicoes, m => m.Instrumento.StartsWith("sombra_", StringComparison.Ordinal) && m.Tags["operacao"] == OperacoesSoap.CancelarNfse);
     }
 
     private void AssertContem(string instrumento, params (string Chave, string Valor)[] tags) =>

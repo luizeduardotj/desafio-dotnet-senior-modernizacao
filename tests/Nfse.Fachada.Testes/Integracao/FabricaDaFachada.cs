@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Nfse.Fachada.Admin;
 using Nfse.Fachada.Encaminhamento;
 using Nfse.Fachada.Flags;
+using Nfse.Fachada.Sombra;
 
 namespace Nfse.Fachada.Testes.Integracao;
 
@@ -58,10 +59,15 @@ internal sealed class FabricaDaFachada(
         builder.ConfigureLogging(logging => logging.AddProvider(Logs).SetMinimumLevel(LogLevel.Debug));
         builder.ConfigureTestServices(services =>
         {
+            HttpMessageHandler novoOuFalha = novo ?? new NovoComFalha((_, _) => throw new InvalidOperationException("novo não configurado"));
             services.RemoveAll<ClientesDeEncaminhamento>();
             services.AddSingleton(new ClientesDeEncaminhamento(
                 new HttpMessageInvoker(legado, disposeHandler: false),
-                new HttpMessageInvoker(novo ?? new NovoComFalha((_, _) => throw new InvalidOperationException("novo não configurado")), disposeHandler: false)));
+                new HttpMessageInvoker(novoOuFalha, disposeHandler: false)));
+            services.RemoveAll<ClientesDaSombra>();
+            services.AddSingleton(new ClientesDaSombra(
+                new HttpMessageInvoker(legado, disposeHandler: false),
+                new HttpMessageInvoker(novoOuFalha, disposeHandler: false)));
             services.AddTransient<IStartupFilter, PortaPublicaNoTestServer>();
             services.RemoveAll<IFonteDeFlags>();
             services.AddSingleton(flags);

@@ -7,6 +7,7 @@ using Nfse.Fachada.Configuracao;
 using Nfse.Fachada.Encaminhamento;
 using Nfse.Fachada.Flags;
 using Nfse.Fachada.Observabilidade;
+using Nfse.Fachada.Sombra;
 using Nfse.Observabilidade;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -40,6 +41,7 @@ builder.WebHost.ConfigureKestrel((contexto, kestrel) =>
 builder.Services.AddOptions<OpcoesFachada>().BindConfiguration(OpcoesFachada.Secao).ValidateDataAnnotations().ValidateOnStart();
 builder.Services.AddOptions<OpcoesLegado>().BindConfiguration(OpcoesLegado.Secao).ValidateDataAnnotations().ValidateOnStart();
 builder.Services.AddOptions<OpcoesNovo>().BindConfiguration(OpcoesNovo.Secao);
+builder.Services.AddOptions<OpcoesSombra>().BindConfiguration(OpcoesSombra.Secao).ValidateDataAnnotations().ValidateOnStart();
 builder.Services.AddOptions<OpcoesAdmin>().BindConfiguration(OpcoesAdmin.Secao).ValidateDataAnnotations().ValidateOnStart();
 builder.Services.Configure<FlagsDeMigracao>(builder.Configuration.GetSection(FlagsDeMigracao.Secao));
 
@@ -49,6 +51,13 @@ builder.Services.AddSingleton(_ => ClientesDeEncaminhamento.Criar());
 builder.Services.AddSingleton<IFonteDeFlags, FonteDeFlagsPorConfiguracao>();
 builder.Services.AddSingleton<KillSwitchAdministrativo>();
 builder.Services.AddSingleton<EncaminhadorSoap>();
+
+// Sombra de leitura (ADR-0009): canal limitado, workers e clientes HTTP próprios, fora do caminho do cliente.
+builder.Services.AddSingleton(_ => ClientesDaSombra.Criar());
+builder.Services.AddSingleton<CanalDaSombra>();
+builder.Services.AddSingleton<PublicadorDaSombra>();
+builder.Services.AddSingleton<ComparadorDaSombra>();
+builder.Services.AddHostedService<TrabalhadorDaSombra>();
 builder.Services.AddSingleton<MedidoresDeEstado>();
 builder.Services.AddHealthChecks().AddCheck<FlagsCarregadasHealthCheck>("flags", tags: ["ready"]);
 

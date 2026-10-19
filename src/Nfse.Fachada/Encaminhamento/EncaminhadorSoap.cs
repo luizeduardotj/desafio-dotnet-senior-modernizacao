@@ -6,6 +6,7 @@ using Nfse.Fachada.Configuracao;
 using Nfse.Fachada.Flags;
 using Nfse.Fachada.Observabilidade;
 using Nfse.Fachada.Roteamento;
+using Nfse.Fachada.Sombra;
 using Yarp.ReverseProxy.Forwarder;
 
 namespace Nfse.Fachada.Encaminhamento;
@@ -18,6 +19,7 @@ public sealed class EncaminhadorSoap(
     KillSwitchAdministrativo killSwitch,
     IOptionsMonitor<OpcoesLegado> legado,
     IOptionsMonitor<OpcoesNovo> novo,
+    PublicadorDaSombra sombra,
     ILogger<EncaminhadorSoap> logger)
 {
     /// <summary>POST de <c>/NfseWS.asmx</c>: decide o destino pela operação do <c>SOAPAction</c>.</summary>
@@ -28,6 +30,8 @@ public sealed class EncaminhadorSoap(
         string nome = OperacoesSoap.NomeParaTelemetria(operacao);
         string modo = "legado"; // fora do escopo é sempre legado
         Decisao decisao;
+        FlagsDeMigracao? flags = null;
+        ReadOnlyMemory<byte>? corpo = null;
 
         if (!OperacoesSoap.EstaEmEscopo(operacao))
         {
@@ -36,14 +40,14 @@ public sealed class EncaminhadorSoap(
         }
         else
         {
-            FlagsDeMigracao? flags = fonteDeFlags.Atual();
+            flags = fonteDeFlags.Atual();
             bool killSwitchAdministrativo = killSwitch.Ativo(operacao);
             modo = flags is null ? "indisponivel" : Telemetria.NomeDoModo(flags.Da(operacao).Modo);
 
             string? chave = null;
             if (DecisorDeDestino.RequerChave(operacao, flags, killSwitchAdministrativo))
             {
-                ReadOnlyMemory<byte>? corpo = await CorpoDaRequisicao
+                corpo = await CorpoDaRequisicao
                     .BufferizarAsync(ctx, OpcoesFachada.LimiteDoCorpo, ctx.RequestAborted).ConfigureAwait(false);
                 chave = corpo is { } bytes ? ExtratorDeChave.Extrair(operacao, bytes.Span) : null;
             }
@@ -53,15 +57,22 @@ public sealed class EncaminhadorSoap(
             {
                 decisao = new(Destino.Legado, MotivoDeRoteamento.NovoNaoConfigurado);
             }
-
-            // TODO(sombra, ADR-0009): com decisao.ElegivelParaSombra, sortear a amostragem depois da resposta do legado
-            // e publicar a cópia num canal limitado. Por ora a elegibilidade só aparece no motivo e na métrica.
         }
 
         TimeSpan noDestino;
         if (decisao.Destino == Destino.Novo)
         {
             (decisao, noDestino) = await EncaminharAoNovoAsync(ctx, operacao, nome, decisao).ConfigureAwait(false);
+        }
+        else if (sombra.Copiavel(operacao, decisao))
+        {
+            // Sombra (ADR-0009): o cliente recebe o legado como sempre; o corpo é copiado no caminho (tee) e só depois
+            // da resposta se sorteia a amostragem e se publica a cópia. O novo é chamado pelos workers.
+            using (CapturaDaResposta.Instalada captura = corpo is null ? default : CapturaDaResposta.Instalar(ctx, OpcoesSombra.LimiteDaResposta))
+            {
+                noDestino = await EncaminharAoLegadoAsync(ctx, nome).ConfigureAwait(false);
+                sombra.AvaliarDepoisDoLegado(ctx, operacao, flags!.Da(operacao).Sombra.Amostragem, corpo, captura.Captura, inicio);
+            }
         }
         else
         {
