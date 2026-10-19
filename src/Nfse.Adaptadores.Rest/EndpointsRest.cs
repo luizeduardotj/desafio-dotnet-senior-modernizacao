@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.OpenApi;
 using Nfse.Aplicacao.Cancelamento;
 using Nfse.Aplicacao.Consultas;
 using Nfse.Dominio.Cancelamento;
@@ -20,7 +21,9 @@ public static class EndpointsRest
 
     public static IEndpointRouteBuilder MapNfseRest(this IEndpointRouteBuilder app)
     {
-        RouteGroupBuilder v1 = app.MapGroup("/api/v1").RequireAuthorization().WithTags("NFS-e");
+        // 401 sai do desafio da autenticação (sem corpo), e o UseStatusCodePages escreve o ProblemDetails.
+        RouteGroupBuilder v1 = app.MapGroup("/api/v1").RequireAuthorization().WithTags("NFS-e")
+            .ProducesProblem(StatusCodes.Status401Unauthorized);
 
         v1.MapGet("/prestadores/{inscricao}/nfse", ListarEmitidasAsync)
           .WithName("ListarNotasEmitidas")
@@ -28,7 +31,8 @@ public static class EndpointsRest
           .Produces<PaginaDto>()
           .ProducesValidationProblem()
           .ProducesProblem(StatusCodes.Status403Forbidden)
-          .ProducesProblem(StatusCodes.Status404NotFound);
+          .ProducesProblem(StatusCodes.Status404NotFound)
+          .LimiteDocumentadoComoInteiro();
 
         v1.MapPost("/prestadores/{inscricao}/nfse/{numero:long}/cancelamento", CancelarAsync)
           .WithName("CancelarNota")
@@ -47,7 +51,8 @@ public static class EndpointsRest
           .WithSummary("Notas recebidas pelo titular do token, de todos os prestadores, no período (inclusivo, até 31 dias).")
           .Produces<PaginaDto>()
           .ProducesValidationProblem()
-          .ProducesProblem(StatusCodes.Status403Forbidden);
+          .ProducesProblem(StatusCodes.Status403Forbidden)
+          .LimiteDocumentadoComoInteiro();
 
         return app;
     }
@@ -56,7 +61,7 @@ public static class EndpointsRest
         string? dataInicial,
         string? dataFinal,
         string? situacao,
-        int? limite,
+        string? limite,
         string? cursor,
         ClaimsPrincipal usuario,
         ConsultaDeNotasTomadas consulta,
@@ -71,6 +76,7 @@ public static class EndpointsRest
         var erros = new Dictionary<string, string[]>(StringComparer.Ordinal);
         PeriodoDeEmissao? periodo = LerPeriodo(dataInicial, dataFinal, erros);
         SituacaoNota? filtroSituacao = LerSituacao(situacao, erros);
+        int tamanho = LerLimite(limite, erros);
 
         // O resumo do cursor usa um hash do documento, nunca o documento em claro.
         string filtros = string.Join('|', "tomador", Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
@@ -86,7 +92,7 @@ public static class EndpointsRest
         }
 
         Resultado<PaginaDeNotas> pagina = await consulta.ListarAsync(
-            titular.Valor, periodo, filtroSituacao, apos, limite ?? ConsultaDeNotasEmitidas.LimitePadrao, cancellationToken).ConfigureAwait(false);
+            titular.Valor, periodo, filtroSituacao, apos, tamanho, cancellationToken).ConfigureAwait(false);
 
         return pagina.Erro switch
         {
@@ -168,7 +174,7 @@ public static class EndpointsRest
         string? dataInicial,
         string? dataFinal,
         string? situacao,
-        int? limite,
+        string? limite,
         string? cursor,
         ClaimsPrincipal usuario,
         ConsultaDeNotasEmitidas consulta,
@@ -182,6 +188,7 @@ public static class EndpointsRest
         var erros = new Dictionary<string, string[]>(StringComparer.Ordinal);
         PeriodoDeEmissao? periodo = LerPeriodo(dataInicial, dataFinal, erros);
         SituacaoNota? filtroSituacao = LerSituacao(situacao, erros);
+        int tamanho = LerLimite(limite, erros);
 
         string filtros = string.Join('|', inscricao, dataInicial, dataFinal, situacao);
         if (!Cursor.TentarDecodificar(cursor, filtros, out PosicaoNaListagem? apos))
@@ -195,7 +202,7 @@ public static class EndpointsRest
         }
 
         Resultado<PaginaDeNotas> pagina = await consulta.ListarAsync(
-            inscricao, periodo, filtroSituacao, apos, limite ?? ConsultaDeNotasEmitidas.LimitePadrao, cancellationToken).ConfigureAwait(false);
+            inscricao, periodo, filtroSituacao, apos, tamanho, cancellationToken).ConfigureAwait(false);
 
         return pagina.Erro switch
         {
@@ -222,6 +229,44 @@ public static class EndpointsRest
         erros[campo] = ["Obrigatória, no formato yyyy-MM-dd."];
         return null;
     }
+
+    /// <summary>
+    /// <c>limite</c> chega como texto para que um valor não inteiro também seja <c>parametros-invalidos</c> com <c>errors</c>;
+    /// com <c>int?</c>, a falha de binding do framework devolveria um 400 genérico (500 em Development) fora do catálogo.
+    /// </summary>
+    private static int LerLimite(string? texto, Dictionary<string, string[]> erros)
+    {
+        if (string.IsNullOrEmpty(texto))
+        {
+            return ConsultaDeNotasEmitidas.LimitePadrao;
+        }
+
+        if (int.TryParse(texto, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int limite))
+        {
+            return limite; // a faixa é regra da consulta (LimiteInvalido)
+        }
+
+        erros["limite"] = [new LimiteInvalido(ConsultaDeNotasEmitidas.LimiteMaximo).Descricao];
+        return ConsultaDeNotasEmitidas.LimitePadrao;
+    }
+
+    /// <summary>No OpenAPI, <c>limite</c> continua inteiro (o mesmo schema que o <c>int?</c> gerava), embora seja lido como texto.</summary>
+    private static TBuilder LimiteDocumentadoComoInteiro<TBuilder>(this TBuilder endpoint)
+        where TBuilder : IEndpointConventionBuilder =>
+        endpoint.AddOpenApiOperationTransformer((operacao, _, _) =>
+        {
+            if (operacao.Parameters?.FirstOrDefault(p => p.Name == "limite") is OpenApiParameter parametro)
+            {
+                parametro.Schema = new OpenApiSchema
+                {
+                    Type = JsonSchemaType.Integer | JsonSchemaType.String,
+                    Format = "int32",
+                    Pattern = "^-?(?:0|[1-9]\\d*)$",
+                };
+            }
+
+            return Task.CompletedTask;
+        });
 
     private static SituacaoNota? LerSituacao(string? texto, Dictionary<string, string[]> erros)
     {

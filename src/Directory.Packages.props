@@ -34,5 +34,7 @@
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.4" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
     <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
+    <!-- validação das respostas REST contra o snapshot do OpenAPI (tests/Nfse.Host.Testes/Contrato/ContratoOpenApi.cs) -->
+    <PackageVersion Include="NJsonSchema" Version="11.6.1" />
   </ItemGroup>
 </Project>

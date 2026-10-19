@@ -55,13 +55,17 @@ public class RestTests : IClassFixture<FabricaDoHost>
     [InlineData("dataInicial=10/01/2026&dataFinal=2026-10-31")]   // não ISO: o legado aceita (C04), a API não
     [InlineData("dataInicial=2026-10-01")]
     [InlineData("dataInicial=2026-10-01&dataFinal=2026-10-31&limite=101")]
+    [InlineData("dataInicial=2026-10-01&dataFinal=2026-10-31&limite=abc")]   // não inteiro: do catálogo, não o 400 do binding
     [InlineData("dataInicial=2026-10-01&dataFinal=2026-10-31&situacao=talvez")]
     [InlineData("dataInicial=2026-10-01&dataFinal=2026-10-31&cursor=lixo")]
     public async Task Parametros_invalidos_sao_400(string query)
     {
         HttpResponseMessage resposta = await Cliente().GetAsync($"/api/v1/prestadores/10000001/nfse?{query}");
+        JsonElement problema = await resposta.Content.ReadFromJsonAsync<JsonElement>();
 
         Assert.Equal(HttpStatusCode.BadRequest, resposta.StatusCode);
+        Assert.Equal("https://api.notacarioca.rio.gov.br/problemas/parametros-invalidos", problema.GetProperty("type").GetString());
+        Assert.NotEmpty(problema.GetProperty("errors").EnumerateObject());
     }
 
     [Fact]
