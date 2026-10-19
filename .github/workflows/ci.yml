@@ -32,3 +32,24 @@ jobs:
         run: dotnet build Nfse.Moderno.slnx -c Release
       - name: Testes unitarios e de arquitetura
         run: dotnet test Nfse.Moderno.slnx -c Release --no-build
+
+  compose:
+    # Ambiente completo do zero (Oracle real com a carga do legado e o NFSE_MODERNO) e smoke test pela fachada.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build das imagens (legado, fachada, serviço novo)
+        run: docker compose build
+      - name: Sobe o ambiente e espera todos saudáveis
+        run: docker compose up -d --wait --wait-timeout 1800
+      - name: Smoke test (health e ConsultarNfse igual ao legado)
+        run: tools/smoke-compose.sh
+      - name: Estado e logs
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail 300
+      - name: Derruba
+        if: always()
+        run: docker compose down -v

@@ -6,6 +6,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../Nfse.Observabilidade/Nfse.Observabilidade.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Nfse.Fachada.Testes" />
   </ItemGroup>
 

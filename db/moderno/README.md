@@ -12,3 +12,8 @@ Objetos do serviço novo no Oracle do legado ([ADR-0002](../../docs/adr/0002-pro
 
 As senhas vêm de variáveis de substituição do SQL*Plus (`&senha_moderno`, `&senha_app`, `&senha_ro`); nunca ficam no
 arquivo.
+
+No compose, [`init.sh`](init.sh) aplica os quatro scripts na primeira subida do Oracle, depois da carga do legado
+(`/container-entrypoint-initdb.d/20_moderno.sh`), com as senhas de `NFSE_MODERNO_PASSWORD`,
+`NFSE_MODERNO_APP_PASSWORD` e `NFSE_MODERNO_RO_PASSWORD`. Se um script falhar ou sobrar objeto inválido no schema, o
+init termina com erro e o container do Oracle para; corrija e suba de novo com `docker compose down -v`.

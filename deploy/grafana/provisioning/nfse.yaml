@@ -1,0 +1,12 @@
+apiVersion: 1
+
+# Dashboards da migração (ADR-0012), somados aos que já vêm no grafana/otel-lgtm.
+providers:
+  - name: "NFS-e"
+    folder: "NFS-e"
+    type: file
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /otel-lgtm/nfse-dashboards
+      foldersFromFilesStructure: false

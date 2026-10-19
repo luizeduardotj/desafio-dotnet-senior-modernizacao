@@ -2,6 +2,9 @@ using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using System.Net;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Nfse.Fachada.Admin;
+using Nfse.Fachada.Flags;
 using Nfse.Fachada.Observabilidade;
 using Nfse.Fachada.Roteamento;
 
@@ -66,6 +69,53 @@ public sealed class TelemetriaTests : IAsyncLifetime, IDisposable
         AssertContem("nfse_duracao_segundos", ("operacao", "ConsultarNfseServicoTomado"), ("destino", "legado"));
         AssertContem("nfse_duracao_segundos", ("operacao", "RecepcionarLoteRps"), ("destino", "legado"));
         Assert.DoesNotContain(_medicoes, m => m.Instrumento == "nfse_fallback_total" && m.Tags["operacao"] == "CancelarNfse");
+    }
+
+    [Fact]
+    public async Task Overhead_da_fachada_por_operacao()
+    {
+        await using var fachada = new FabricaDaFachada(_legado.CriarHandler(), null, new FlagsFixas(PassThroughTests.Flags("sombra")));
+
+        (await fachada.EnviarSoapAsync(OperacoesSoap.CancelarNfse, Exemplos.Bytes("06-cancelar-nfse.xml"))).Dispose();
+        (await fachada.EnviarSoapAsync("RecepcionarLoteRps", Exemplos.Bytes("01-recepcionar-lote-rps.xml"))).Dispose();
+
+        AssertContem("fachada_overhead_segundos", ("operacao", "CancelarNfse"));
+        AssertContem("fachada_overhead_segundos", ("operacao", "RecepcionarLoteRps"));
+        Assert.All(_medicoes.Where(m => m.Instrumento == "fachada_overhead_segundos"), m =>
+        {
+            Assert.InRange(m.Valor, 0, 5);
+            Assert.Equal(["operacao"], m.Tags.Keys);
+        });
+    }
+
+    [Fact]
+    public async Task Gauges_de_modo_e_kill_switch()
+    {
+        FlagsDeMigracao flags = PassThroughTests.Flags("novo", 5);
+        flags.Operacoes[OperacoesSoap.CancelarNfse].Modo = ModoDeMigracao.Legado;
+        await using var fachada = new FabricaDaFachada(_legado.CriarHandler(), null, new FlagsFixas(flags));
+        _ = fachada.Server;
+
+        _ouvinte.RecordObservableInstruments();
+        AssertContem("migracao_modo_info", ("operacao", "ConsultarNfse"), ("modo", "novo"), ("percentual", "5"));
+        AssertContem("migracao_modo_info", ("operacao", "CancelarNfse"), ("modo", "legado"), ("percentual", "5"));
+        Assert.Contains(_medicoes, m => m.Instrumento == "kill_switch_ativo" && m.Valor == 0 && m.Tags.Count == 0);
+
+        _medicoes.Clear();
+        fachada.Services.GetRequiredService<KillSwitchAdministrativo>().Ativar(OperacoesSoap.CancelarNfse);
+        _ouvinte.RecordObservableInstruments();
+        Assert.Contains(_medicoes, m => m.Instrumento == "kill_switch_ativo" && m.Valor == 1);
+    }
+
+    [Fact]
+    public async Task Gauge_de_modo_com_flags_indisponiveis()
+    {
+        await using var fachada = new FabricaDaFachada(_legado.CriarHandler(), null, new FlagsFixas(null));
+        _ = fachada.Server;
+
+        _ouvinte.RecordObservableInstruments();
+
+        AssertContem("migracao_modo_info", ("operacao", "ConsultarNfseServicoTomado"), ("modo", "indisponivel"), ("percentual", "0"));
     }
 
     [Fact]

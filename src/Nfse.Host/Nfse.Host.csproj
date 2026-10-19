@@ -5,6 +5,7 @@
     <ProjectReference Include="../Nfse.Infra.Oracle/Nfse.Infra.Oracle.csproj" />
     <ProjectReference Include="../Nfse.Adaptadores.Rest/Nfse.Adaptadores.Rest.csproj" />
     <ProjectReference Include="../Nfse.Adaptadores.Soap/Nfse.Adaptadores.Soap.csproj" />
+    <ProjectReference Include="../Nfse.Observabilidade/Nfse.Observabilidade.csproj" />
   </ItemGroup>
 
 </Project>

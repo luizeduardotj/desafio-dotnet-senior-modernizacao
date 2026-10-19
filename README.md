@@ -52,6 +52,27 @@ O legado roda em `net48` e `net8.0`. Em produção ele roda em .NET Framework 4.
 
 Não há outra documentação. Como em todo legado, **o comportamento em produção é a especificação real**, e ele nem sempre bate com o manual.
 
+## Como rodar
+
+O compose sobe tudo do zero: Oracle (legado e schema `NFSE_MODERNO`), legado, fachada, serviço novo e observabilidade. A primeira carga leva alguns minutos e usa de 2 a 3 GB de RAM.
+
+```bash
+cp .env.example .env                 # opcional: senhas e token admin de desenvolvimento
+docker compose up -d --build --wait  # espera todos os serviços saudáveis
+tools/smoke-compose.sh               # health e ConsultarNfse igual pela fachada e no legado
+docker compose down -v               # derruba e apaga o banco
+```
+
+| Serviço | URL | |
+| --- | --- | --- |
+| fachada (SOAP) | `http://127.0.0.1:8080/NfseWS.asmx` | todo o SOAP entra por aqui; `/health` é o do legado, `/health/ready` é o da fachada |
+| fachada (admin) | `http://127.0.0.1:8081/admin/kill-switch` | header `X-Admin-Token` (`FACHADA_ADMIN_TOKEN`; vazio fecha) |
+| serviço novo | `http://127.0.0.1:8090/health/ready` | ainda sem SOAP nem REST |
+| Grafana | `http://127.0.0.1:3000` | dashboard **NFS-e › Migração por operação**; traces no Tempo, logs no Loki |
+| Oracle | `127.0.0.1:1521/FREEPDB1` | `NFSE_OWNER` (legado), `NFSE_MODERNO_APP` e `NFSE_MODERNO_RO` (serviço novo) |
+
+O legado não publica porta: só é alcançável pela fachada ou de dentro da rede do compose. Os modos de migração ficam em [`deploy/flags/flags.json`](deploy/flags/flags.json), recarregado sem restart ([fachada](src/Nfse.Fachada/README.md#flags)).
+
 ## O que construir
 
 ### 1. A fachada (strangler fig)

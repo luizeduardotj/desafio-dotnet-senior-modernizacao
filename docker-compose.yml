@@ -1,16 +1,33 @@
+# Ambiente completo do zero: Oracle (legado + NFSE_MODERNO), legado, fachada, serviço novo e observabilidade.
+#   cp .env.example .env   # opcional: sem .env valem os padrões de desenvolvimento abaixo
+#   docker compose up -d --build --wait
+# A primeira subida do Oracle cria o schema e carrega ~2 milhões de notas (alguns minutos, 2–3 GB de RAM).
+# Só a fachada, o serviço novo, o Grafana e o Oracle publicam portas, e só em 127.0.0.1. O legado passa a ser interno:
+# o SOAP entra pela fachada (ADR-0008).
+
+x-dotnet-env: &dotnet-env
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
+  OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+  OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=compose
+  OTEL_METRIC_EXPORT_INTERVAL: "10000"
+
 services:
   oracle:
     image: gvenzl/oracle-free:23-slim
     environment:
       TZ: America/Sao_Paulo
-      ORACLE_PASSWORD: oracle_dev_123
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:-oracle_dev_123}
       APP_USER: NFSE_OWNER
-      APP_USER_PASSWORD: nfse_dev_123
+      APP_USER_PASSWORD: ${NFSE_OWNER_PASSWORD:-nfse_dev_123}
+      NFSE_MODERNO_PASSWORD: ${NFSE_MODERNO_PASSWORD:-moderno_dev_123}
+      NFSE_MODERNO_APP_PASSWORD: ${NFSE_MODERNO_APP_PASSWORD:-moderno_app_dev_123}
+      NFSE_MODERNO_RO_PASSWORD: ${NFSE_MODERNO_RO_PASSWORD:-moderno_ro_dev_123}
     ports:
       - "127.0.0.1:1521:1521"
     volumes:
       - ./db:/opt/nfse/db:ro
       - ./db/init.sh:/container-entrypoint-initdb.d/10_nfse.sh:ro
+      - ./db/moderno/init.sh:/container-entrypoint-initdb.d/20_moderno.sh:ro
       - oracle-data:/opt/oracle/oradata
     healthcheck:
       test: ["CMD", "healthcheck.sh"]
@@ -19,18 +36,87 @@ services:
       retries: 60
       start_period: 60s
 
+  # Legado: só na rede do compose. Para chamá-lo direto, `docker compose exec` ou um container na mesma rede.
   webservices:
+    image: nfse-legado:${NFSE_VERSAO:-0.1.0}
     build: .
     environment:
       TZ: America/Sao_Paulo
       ASPNETCORE_URLS: http://+:8080
-      NFSE_CONNECTION_STRING: "User Id=NFSE_OWNER;Password=nfse_dev_123;Data Source=oracle:1521/FREEPDB1;Min Pool Size=2;Connection Timeout=30"
+      NFSE_CONNECTION_STRING: "User Id=NFSE_OWNER;Password=${NFSE_OWNER_PASSWORD:-nfse_dev_123};Data Source=oracle:1521/FREEPDB1;Min Pool Size=2;Connection Timeout=30"
     mem_limit: 3g
-    ports:
-      - "127.0.0.1:8080:8080"
+    expose:
+      - "8080"
+    healthcheck:
+      # A imagem do legado não tem curl nem wget; o bash abre a conexão sozinho.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q ' 200'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     depends_on:
       oracle:
         condition: service_healthy
+
+  fachada:
+    image: nfse-fachada:${NFSE_VERSAO:-0.1.0}
+    build:
+      context: .
+      dockerfile: src/Nfse.Fachada/Dockerfile
+    environment:
+      <<: *dotnet-env
+      Legado__Url: http://webservices:8080
+      # Sem Novo__Url o modo `novo` cai no legado (fail-safe). Descomente quando o serviço novo atender o SOAP.
+      # Novo__Url: http://nfse-novo:8080
+      Fachada__ArquivoDeFlags: /config/flags/flags.json
+      DOTNET_USE_POLLING_FILE_WATCHER: "true"
+      # Vazio fecha os endpoints administrativos; o valor de desenvolvimento está em .env.example.
+      Admin__Token: ${FACHADA_ADMIN_TOKEN:-}
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8081:8081"
+    volumes:
+      # Pasta, não o arquivo: editores que salvam trocando o inode quebrariam o bind de um arquivo único.
+      - ./deploy/flags:/config/flags:ro
+    depends_on:
+      webservices:
+        condition: service_healthy
+      otel-lgtm:
+        condition: service_healthy
+
+  nfse-novo:
+    image: nfse-novo:${NFSE_VERSAO:-0.1.0}
+    build:
+      context: .
+      dockerfile: src/Nfse.Host/Dockerfile
+    environment:
+      <<: *dotnet-env
+      # Runtime do serviço novo (ADR-0002); ainda não usado pelo Host.
+      ConnectionStrings__Oracle: "User Id=NFSE_MODERNO_APP;Password=${NFSE_MODERNO_APP_PASSWORD:-moderno_app_dev_123};Data Source=oracle:1521/FREEPDB1"
+    ports:
+      - "127.0.0.1:8090:8080"
+    depends_on:
+      oracle:
+        condition: service_healthy
+      otel-lgtm:
+        condition: service_healthy
+
+  # OpenTelemetry Collector + Tempo + Prometheus + Loki + Grafana (ADR-0012). Grafana sem login em desenvolvimento.
+  otel-lgtm:
+    image: grafana/otel-lgtm:0.36.0
+    ports:
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    volumes:
+      - ./deploy/grafana/provisioning/nfse.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/nfse.yaml:ro
+      - ./deploy/grafana/dashboards:/otel-lgtm/nfse-dashboards:ro
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 36
+      start_period: 10s
 
 volumes:
   oracle-data:

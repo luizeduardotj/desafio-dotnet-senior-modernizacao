@@ -3,9 +3,13 @@ set shell := ["bash", "-cu"]
 default:
     @just --list
 
-# sobe Oracle (com carga) e o host dos webservices
+# sobe tudo do zero: Oracle (com carga e NFSE_MODERNO), legado, fachada, serviço novo e otel-lgtm
 up:
-    docker compose up -d --build
+    docker compose up -d --build --wait
+
+# health e ConsultarNfse igual pela fachada e direto no legado
+smoke:
+    tools/smoke-compose.sh
 
 down:
     docker compose down -v

@@ -6,6 +6,8 @@ using Nfse.Fachada.Admin;
 using Nfse.Fachada.Configuracao;
 using Nfse.Fachada.Encaminhamento;
 using Nfse.Fachada.Flags;
+using Nfse.Fachada.Observabilidade;
+using Nfse.Observabilidade;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,6 +22,10 @@ builder.Configuration.AddJsonFile(fonte =>
     fonte.OnLoadException = contexto => contexto.Ignore = true;
     fonte.ResolveFileProvider();
 });
+
+// Traces, métricas e logs (ADR-0012). O span do ASP.NET Core recebe os atributos de migração (Telemetria.MarcarSpan) e
+// o HttpClient do YARP cria o span filho da chamada ao destino, propagando traceparent.
+builder.AdicionarTelemetriaNfse("nfse-fachada", Telemetria.Nome);
 
 builder.WebHost.ConfigureKestrel((contexto, kestrel) =>
 {
@@ -43,6 +49,7 @@ builder.Services.AddSingleton(_ => ClientesDeEncaminhamento.Criar());
 builder.Services.AddSingleton<IFonteDeFlags, FonteDeFlagsPorConfiguracao>();
 builder.Services.AddSingleton<KillSwitchAdministrativo>();
 builder.Services.AddSingleton<EncaminhadorSoap>();
+builder.Services.AddSingleton<MedidoresDeEstado>();
 builder.Services.AddHealthChecks().AddCheck<FlagsCarregadasHealthCheck>("flags", tags: ["ready"]);
 
 var app = builder.Build();
@@ -51,6 +58,9 @@ if (app.Services.GetRequiredService<IOptions<OpcoesFachada>>().Value.Porta == ap
 {
     throw new InvalidOperationException("Fachada:Porta e Admin:Porta precisam ser diferentes.");
 }
+
+// Os gauges são observáveis: só precisam existir para entrar na coleta.
+app.Services.GetRequiredService<MedidoresDeEstado>();
 
 // Plano de dados só na porta pública; administração só na interna (PortaDoEndpointMatcherPolicy).
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false }).SomenteNaPorta(Plano.Dados);

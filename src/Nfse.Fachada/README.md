@@ -35,6 +35,7 @@ Falha no novo:
 | `Fachada__ArquivoDeFlags` | `flags.json` | caminho relativo ao content root, ou absoluto |
 | `Admin__Porta` | `8081` | porta interna dos endpoints administrativos |
 | `Admin__Token` | — | segredo do header `X-Admin-Token`; vazio fecha os endpoints |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | coletor OTLP (no compose, `http://otel-lgtm:4317`); sem ela, nada é exportado |
 
 ## Flags
 
@@ -63,6 +64,8 @@ Seção `Migracao` do arquivo de flags. O arquivo é observado e recarregado sem
 - As listas contêm IMs (ou documentos só com dígitos, em `ConsultarNfseServicoTomado`).
 - **Fail-safe:** com arquivo ausente, JSON inválido, valor que não converte (`"Modo": "talvez"`) ou percentual fora de 0..100, a fonte devolve `null`. Nesse caso tudo vai ao legado e `/health/ready` responde 503.
 
+No compose, as flags vêm de [`deploy/flags/flags.json`](../../deploy/flags/flags.json), montado em `/config/flags`: edite o arquivo e a fachada recarrega em até ~4 s, sem rebuild nem restart.
+
 ## Kill switch nível 2
 
 Vale imediatamente **nesta réplica**. O operador aplica o comando em todas as réplicas (plano, seção 8). O estado fica em memória e se perde no restart: para durar, use o nível 1 (`KillSwitch` no arquivo de flags).
@@ -77,6 +80,7 @@ curl           -H "X-Admin-Token: $TOKEN" http://fachada:8081/admin/kill-switch 
 ## Observabilidade
 
 - Os logs são estruturados ([`Log.cs`](Observabilidade/Log.cs)) e trazem operação, destino, motivo, status e duração. Nunca trazem IM, documento ou corpo. Um nome de operação desconhecido aparece como `desconhecida`.
+- O registro do OpenTelemetry é comum à fachada e ao serviço novo ([`Nfse.Observabilidade`](../Nfse.Observabilidade/RegistroDaTelemetria.cs)): traces de ASP.NET Core e HttpClient (o cliente do YARP cria o span filho da chamada ao destino e propaga `traceparent`), métricas de runtime, ASP.NET Core, HttpClient e do meter `Nfse.Fachada`, e logs pelo OTLP. No console, os logs saem em JSON com `TraceId` e `SpanId` no escopo. `/health/live` e `/health/ready` ficam fora dos traces.
 - [`Telemetria`](Observabilidade/Telemetria.cs) põe `soap.operacao`, `migracao.modo`, `migracao.destino` e `migracao.motivo_roteamento` no `Activity` da requisição. O motivo fica **só** no span.
 - O `Meter` `Nfse.Fachada` publica as métricas da ADR-0012:
 
@@ -85,17 +89,25 @@ curl           -H "X-Admin-Token: $TOKEN" http://fachada:8081/admin/kill-switch 
 | `nfse_requisicoes_total` | `operacao`, `modo`, `destino`, `resultado` | uma por requisição SOAP; `destino` é quem respondeu, depois de um eventual fallback |
 | `nfse_duracao_segundos` | `operacao`, `destino` | cada chamada ao legado ou ao novo |
 | `nfse_fallback_total` | `operacao`, `causa` | idas ao legado depois de falha no novo |
+| `fachada_overhead_segundos` | `operacao` | tempo da requisição SOAP fora das chamadas aos destinos (orçamento da ADR-0008); inclui a leitura do corpo bufferizado |
+| `migracao_modo_info` (gauge) | `operacao`, `modo`, `percentual` | modo configurado por operação ([`MedidoresDeEstado`](Observabilidade/MedidoresDeEstado.cs)) |
+| `kill_switch_ativo` (gauge) | — | 1 se algum kill switch, do arquivo ou administrativo, está ligado |
 
 - `modo` vale `legado`, `sombra`, `novo` ou `indisponivel` (flags não lidas). Operação fora do escopo conta como `legado` e operação desconhecida aparece como `desconhecida`.
 - `resultado` vale `ok` (2xx) ou `fault` (o resto). `erro_negocio` ainda não existe, porque exige ler o corpo da resposta (ver TODO).
 - `causa` vale `conexao`, `transporte`, `timeout`, `http_502`, `http_503` ou `http_504`.
 - Nenhuma IM ou documento vira label.
-- O cliente HTTP já propaga `traceparent`.
+- O cliente HTTP propaga `traceparent`.
+- Os histogramas usam buckets em segundos (o padrão do SDK pressupõe milissegundos).
+- No Prometheus, o OTLP acrescenta o sufixo da unidade aos histogramas: `nfse_duracao_segundos_seconds_bucket` e `fachada_overhead_segundos_seconds_bucket`. Os contadores e os gauges ficam com o nome da ADR.
+- No compose, o dashboard **Migração por operação** fica no Grafana do `otel-lgtm` (pasta NFS-e), provisionado de [`deploy/grafana`](../../deploy/grafana).
 
 ## TODO
 
 - [ ] **OpenFeature + flagd** (ADR-0008): implementar `IFonteDeFlags` sobre `OpenFeature` com o provider flagd (sync por watch). Ficam valendo o mesmo retrato `FlagsDeMigracao`, o fail-safe para `null` e o atributo no span a cada avaliação. Hoje a fonte é `FonteDeFlagsPorConfiguracao` (arquivo observado).
-- [ ] **OpenTelemetry** (ADR-0012): `AddOpenTelemetry().WithTracing(t => t.AddAspNetCoreInstrumentation().AddHttpClientInstrumentation().AddSource("Nfse.Fachada"))` e `WithMetrics(m => m.AddMeter("Nfse.Fachada"))`, exportando por OTLP. Faltam também o histograma `fachada_overhead_segundos`, o span filho da chamada ao destino, o resultado `erro_negocio` (resposta 200 com `ListaMensagemRetorno`) e os gauges `migracao_modo_info` e `kill_switch_ativo`.
+- [x] **OpenTelemetry** (ADR-0012): tracing, métricas e logs exportados por OTLP, `fachada_overhead_segundos`, span filho da chamada ao destino (instrumentação do HttpClient) e os gauges `migracao_modo_info` e `kill_switch_ativo`.
+- [ ] Resultado `erro_negocio` (resposta 200 com `ListaMensagemRetorno`): exige ler o corpo da resposta, junto da sombra.
+- [ ] Pseudonimização (HMAC) de documentos e IMs num processador de logs (ADR-0012). Hoje nenhum log da fachada recebe esses dados; o processador vale como defesa para logs novos.
 - [ ] **Sombra** (ADR-0009): usar `Decisao.ElegivelParaSombra` mais a amostragem sorteada depois da resposta do legado. A cópia vai a um canal limitado e o novo é chamado fora do caminho da resposta.
 - [ ] Timeout total (não só de inatividade) por operação no novo, se a medição do M0 mostrar necessidade.
-- [ ] Dockerfile e serviço `fachada` no `compose.yaml`.
+- [x] [Dockerfile](Dockerfile) e serviço `fachada` no [`docker-compose.yml`](../../docker-compose.yml), com as flags montadas de [`deploy/flags`](../../deploy/flags/flags.json).

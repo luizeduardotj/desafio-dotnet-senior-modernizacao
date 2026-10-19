@@ -38,7 +38,7 @@ public sealed class EncaminhadorSoap(
         {
             FlagsDeMigracao? flags = fonteDeFlags.Atual();
             bool killSwitchAdministrativo = killSwitch.Ativo(operacao);
-            modo = flags is null ? "indisponivel" : NomeDoModo(flags.Da(operacao).Modo);
+            modo = flags is null ? "indisponivel" : Telemetria.NomeDoModo(flags.Da(operacao).Modo);
 
             string? chave = null;
             if (DecisorDeDestino.RequerChave(operacao, flags, killSwitchAdministrativo))
@@ -58,25 +58,28 @@ public sealed class EncaminhadorSoap(
             // e publicar a cópia num canal limitado. Por ora a elegibilidade só aparece no motivo e na métrica.
         }
 
+        TimeSpan noDestino;
         if (decisao.Destino == Destino.Novo)
         {
-            decisao = await EncaminharAoNovoAsync(ctx, operacao, nome, decisao).ConfigureAwait(false);
+            (decisao, noDestino) = await EncaminharAoNovoAsync(ctx, operacao, nome, decisao).ConfigureAwait(false);
         }
         else
         {
-            await EncaminharAoLegadoAsync(ctx, nome).ConfigureAwait(false);
+            noDestino = await EncaminharAoLegadoAsync(ctx, nome).ConfigureAwait(false);
         }
 
+        TimeSpan total = Stopwatch.GetElapsedTime(inicio);
         Telemetria.MarcarSpan(nome, modo, decisao);
         Telemetria.ContarRequisicao(nome, modo, decisao.Destino, ctx.Response.StatusCode);
-        Log.Roteada(logger, nome, decisao.Destino, decisao.Motivo, ctx.Response.StatusCode,
-            (long)Stopwatch.GetElapsedTime(inicio).TotalMilliseconds);
+        Telemetria.MedirOverhead(nome, total - noDestino);
+        Log.Roteada(logger, nome, decisao.Destino, decisao.Motivo, ctx.Response.StatusCode, (long)total.TotalMilliseconds);
     }
 
     /// <summary>Pass-through ao legado: WSDL, <c>/health</c> do legado e qualquer outro caminho.</summary>
     public Task EncaminharAoLegadoAsync(HttpContext ctx) => EncaminharAoLegadoAsync(ctx, "passthrough", medir: false);
 
-    private async Task EncaminharAoLegadoAsync(HttpContext ctx, string nome, bool medir = true)
+    /// <returns>Tempo gasto na chamada ao legado (envio, espera e cópia da resposta ao cliente).</returns>
+    private async Task<TimeSpan> EncaminharAoLegadoAsync(HttpContext ctx, string nome, bool medir = true)
     {
         OpcoesLegado opcoes = legado.CurrentValue;
         long inicio = Stopwatch.GetTimestamp();
@@ -84,19 +87,23 @@ public sealed class EncaminhadorSoap(
             ctx, opcoes.Url!.ToString(), clientes.Legado,
             new ForwarderRequestConfig { ActivityTimeout = opcoes.Timeout },
             HttpTransformer.Default).ConfigureAwait(false);
+        TimeSpan duracao = Stopwatch.GetElapsedTime(inicio);
 
         if (medir)
         {
-            Telemetria.MedirDuracao(nome, Destino.Legado, Stopwatch.GetElapsedTime(inicio));
+            Telemetria.MedirDuracao(nome, Destino.Legado, duracao);
         }
 
         if (erro != ForwarderError.None)
         {
             Log.FalhaNoLegado(logger, nome, erro.ToString());
         }
+
+        return duracao;
     }
 
-    private async Task<Decisao> EncaminharAoNovoAsync(HttpContext ctx, string operacao, string nome, Decisao decisao)
+    /// <returns>A decisão final (fallback muda o destino) e o tempo gasto nos destinos, somando o eventual legado.</returns>
+    private async Task<(Decisao Decisao, TimeSpan NoDestino)> EncaminharAoNovoAsync(HttpContext ctx, string operacao, string nome, Decisao decisao)
     {
         OpcoesNovo opcoes = novo.CurrentValue;
         bool leitura = OperacoesSoap.EhLeitura(operacao);
@@ -107,16 +114,17 @@ public sealed class EncaminhadorSoap(
             ctx, opcoes.Url!.ToString(), clientes.Novo,
             new ForwarderRequestConfig { ActivityTimeout = leitura ? opcoes.TimeoutLeitura : opcoes.TimeoutCancelamento },
             transformador).ConfigureAwait(false);
-        Telemetria.MedirDuracao(nome, Destino.Novo, Stopwatch.GetElapsedTime(inicio));
+        TimeSpan noNovo = Stopwatch.GetElapsedTime(inicio);
+        Telemetria.MedirDuracao(nome, Destino.Novo, noNovo);
 
         if (erro == ForwarderError.None && transformador.StatusDescartado is null)
         {
-            return decisao;
+            return (decisao, noNovo);
         }
 
         if (ctx.RequestAborted.IsCancellationRequested)
         {
-            return decisao;
+            return (decisao, noNovo);
         }
 
         string descricao = transformador.StatusDescartado is int status ? $"HTTP {status}" : erro.ToString();
@@ -133,8 +141,8 @@ public sealed class EncaminhadorSoap(
             ctx.Response.Clear();
             ctx.Features.Set<IForwarderErrorFeature>(null);
             ctx.Request.Body.Position = 0;
-            await EncaminharAoLegadoAsync(ctx, nome).ConfigureAwait(false);
-            return new(Destino.Legado, MotivoDeRoteamento.Fallback);
+            TimeSpan noLegado = await EncaminharAoLegadoAsync(ctx, nome).ConfigureAwait(false);
+            return (new(Destino.Legado, MotivoDeRoteamento.Fallback), noNovo + noLegado);
         }
 
         Log.FalhaSemFallback(logger, nome, descricao);
@@ -144,7 +152,7 @@ public sealed class EncaminhadorSoap(
             await FaultSoap.EscreverAsync(ctx, "soap:Server", "Erro interno: falha ao processar a requisição").ConfigureAwait(false);
         }
 
-        return decisao;
+        return (decisao, noNovo);
     }
 
     private static string CausaDoFallback(int? statusDescartado, ForwarderError erro, Exception? excecao) =>
@@ -170,11 +178,4 @@ public sealed class EncaminhadorSoap(
 
         return false;
     }
-
-    private static string NomeDoModo(ModoDeMigracao modo) => modo switch
-    {
-        ModoDeMigracao.Sombra => "sombra",
-        ModoDeMigracao.Novo => "novo",
-        _ => "legado",
-    };
 }

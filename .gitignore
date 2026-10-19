@@ -6,3 +6,4 @@ obj/
 TestResults/
 tools/saida/
 tools/lotes/
+.env
