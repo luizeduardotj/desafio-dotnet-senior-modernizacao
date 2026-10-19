@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Nfse.Adaptadores.Rest/Nfse.Adaptadores.Rest.csproj" />
+    <Project Path="src/Nfse.Adaptadores.Soap/Nfse.Adaptadores.Soap.csproj" />
+    <Project Path="src/Nfse.Aplicacao/Nfse.Aplicacao.csproj" />
+    <Project Path="src/Nfse.Dominio/Nfse.Dominio.csproj" />
+    <Project Path="src/Nfse.Fachada/Nfse.Fachada.csproj" />
+    <Project Path="src/Nfse.Host/Nfse.Host.csproj" />
+    <Project Path="src/Nfse.Infra.Oracle/Nfse.Infra.Oracle.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Nfse.Arquitetura.Testes/Nfse.Arquitetura.Testes.csproj" />
+    <Project Path="tests/Nfse.Dominio.Testes/Nfse.Dominio.Testes.csproj" />
+    <Project Path="tests/Nfse.Fachada.Testes/Nfse.Fachada.Testes.csproj" />
+  </Folder>
+</Solution>

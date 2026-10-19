@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="../Nfse.Aplicacao/Nfse.Aplicacao.csproj" />
+    <ProjectReference Include="../Nfse.Infra.Oracle/Nfse.Infra.Oracle.csproj" />
+    <ProjectReference Include="../Nfse.Adaptadores.Rest/Nfse.Adaptadores.Rest.csproj" />
+    <ProjectReference Include="../Nfse.Adaptadores.Soap/Nfse.Adaptadores.Soap.csproj" />
+  </ItemGroup>
+
+</Project>
