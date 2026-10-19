@@ -1,4 +1,5 @@
 # SOAP (/NfseWS.asmx, chamado pela fachada) e REST (/api/v1, chamado pelo ingress) na mesma porta.
+# A 8081 é interna: só a fachada, pela sombra do cancelamento (NetworkPolicy).
 apiVersion: v1
 kind: Service
 metadata:
@@ -11,3 +12,6 @@ spec:
     - name: http
       port: 8080
       targetPort: http
+    - name: interno
+      port: 8081
+      targetPort: interno

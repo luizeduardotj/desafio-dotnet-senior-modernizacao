@@ -1,12 +1,17 @@
 namespace Nfse.Fachada.Sombra;
 
-/// <summary>Classes automáticas da sombra de leitura (ADR-0009, seção 4). <c>bug_novo</c>/<c>bug_legado</c> são da triagem humana.</summary>
+/// <summary>
+/// Classes automáticas da sombra (ADR-0009, seção 4). <c>FronteiraRelogio</c> e <c>Indeterminado</c> só vêm do
+/// cancelamento, atribuídas pelo serviço novo. <c>bug_novo</c>/<c>bug_legado</c> são da triagem humana.
+/// </summary>
 internal enum ClasseDeDivergencia
 {
     NaoClassificada,
     Corrida,
     ErroNovo,
     DecisaoConsciente,
+    FronteiraRelogio,
+    Indeterminado,
 }
 
 /// <summary>
@@ -20,6 +25,8 @@ internal static class ClassificadorDeDivergencia
         ClasseDeDivergencia.Corrida => "corrida",
         ClasseDeDivergencia.ErroNovo => "erro_novo",
         ClasseDeDivergencia.DecisaoConsciente => "decisao_consciente",
+        ClasseDeDivergencia.FronteiraRelogio => "fronteira_relogio",
+        ClasseDeDivergencia.Indeterminado => "indeterminado",
         _ => "nao_classificada",
     };
 

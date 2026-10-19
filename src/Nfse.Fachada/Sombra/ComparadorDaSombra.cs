@@ -9,7 +9,7 @@ using Nfse.Fachada.Observabilidade;
 namespace Nfse.Fachada.Sombra;
 
 /// <summary>
-/// Executa uma cópia no novo, compara com a resposta do legado e classifica a divergência (ADR-0009, seções 2 e 4).
+/// Executa uma cópia de leitura no novo, compara com a resposta do legado e classifica a divergência (ADR-0009, seções 2 e 4).
 /// Roda nos workers, fora do caminho do cliente, com timeout próprio.
 /// </summary>
 internal sealed class ComparadorDaSombra(
@@ -25,14 +25,8 @@ internal sealed class ComparadorDaSombra(
     {
         string operacao = copia.Operacao;
 
-        // Trace próprio, ligado ao da requisição original: a sombra não infla a duração do trace do cliente (ADR-0012).
-        Activity.Current = null;
-        using Activity? span = TelemetriaDaSombra.Fonte.StartActivity(
-            ActivityKind.Internal, parentContext: default,
-            tags: [new("soap.operacao", operacao), new("migracao.modo", "sombra")],
-            links: copia.Origem == default ? null : [new ActivityLink(copia.Origem)],
-            name: "sombra " + operacao);
-        string traceId = copia.Origem == default ? "-" : copia.Origem.TraceId.ToHexString();
+        using Activity? span = TelemetriaDaSombra.IniciarSpan(copia);
+        string traceId = TelemetriaDaSombra.TraceIdDaOrigem(copia);
 
         try
         {
@@ -139,7 +133,7 @@ internal sealed class ComparadorDaSombra(
     }
 
     /// <summary>Até um byte além do limite: uma resposta maior que a do legado (≤ 1 MiB) já não pode ser igual.</summary>
-    private static async Task<byte[]> LerAsync(HttpContent conteudo, CancellationToken ct)
+    internal static async Task<byte[]> LerAsync(HttpContent conteudo, CancellationToken ct)
     {
         Stream corpo = await conteudo.ReadAsStreamAsync(ct).ConfigureAwait(false);
         await using (corpo.ConfigureAwait(false))
@@ -164,13 +158,13 @@ internal sealed class ComparadorDaSombra(
         }
     }
 
-    private static void Registrar(Activity? span, string operacao, ClasseDeDivergencia classe)
+    internal static void Registrar(Activity? span, string operacao, ClasseDeDivergencia classe)
     {
         TelemetriaDaSombra.ContarDivergencia(operacao, classe);
         span?.SetTag("sombra.classe", ClassificadorDeDivergencia.Nome(classe));
     }
 
-    private static string Sha256(byte[] corpo) => Convert.ToHexStringLower(SHA256.HashData(corpo));
+    internal static string Sha256(byte[] corpo) => Convert.ToHexStringLower(SHA256.HashData(corpo));
 
     /// <param name="Erro"><c>timeout</c> ou <c>transporte</c>; <c>null</c> quando houve resposta HTTP.</param>
     private readonly record struct Resultado(int Status, byte[] Corpo, string? Erro);

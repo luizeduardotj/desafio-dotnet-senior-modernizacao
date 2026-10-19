@@ -230,26 +230,6 @@ public sealed class SombraTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task CancelarNfse_nunca_e_copiado_para_o_novo()
-    {
-        // Em sombra, elegível, amostragem 100 e resposta em chave rara (E050): mesmo assim não vai.
-        _legado.Responder = (ctx, req) => Responder(req.SoapAction.Contains(OperacoesSoap.CancelarNfse, StringComparison.Ordinal)
-            ? Exemplos.Bytes("06e-cancelar-nfse-inexistente.resposta.xml")
-            : Exemplos.Bytes(RespostaDaConsulta))(ctx, req);
-        await using var fachada = Fachada(Flags(100));
-
-        using HttpResponseMessage cancelamento = await fachada.EnviarSoapAsync(OperacoesSoap.CancelarNfse, Exemplos.Bytes("06e-cancelar-nfse-inexistente.xml"));
-        Assert.Equal(Exemplos.Bytes("06e-cancelar-nfse-inexistente.resposta.xml"), await cancelamento.Content.ReadAsByteArrayAsync());
-
-        // Uma consulta depois: quando ela chega ao novo, o cancelamento já teria chegado (canal FIFO).
-        (await fachada.EnviarSoapAsync(OperacoesSoap.ConsultarNfse, Exemplos.Bytes(Consulta))).Dispose();
-        await Eventualmente(() => Sombra(fachada).Any(m => m.Contains("Sombra ConsultarNfse: igual", StringComparison.Ordinal)));
-
-        Assert.Equal(Exemplos.SoapAction(OperacoesSoap.ConsultarNfse), Assert.Single(_novo.Recebidas).SoapAction);
-        Assert.DoesNotContain(Sombra(fachada), m => m.Contains(OperacoesSoap.CancelarNfse, StringComparison.Ordinal));
-    }
-
-    [Fact]
     public async Task Operacao_fora_de_sombra_nao_e_copiada()
     {
         FlagsDeMigracao flags = Flags(100);

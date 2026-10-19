@@ -51,6 +51,9 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            # Avaliação da sombra do cancelamento; a NetworkPolicy só deixa a fachada chegar aqui.
+            - name: interno
+              containerPort: 8081
           envFrom:
             - configMapRef:
                 name: nfse-novo-config

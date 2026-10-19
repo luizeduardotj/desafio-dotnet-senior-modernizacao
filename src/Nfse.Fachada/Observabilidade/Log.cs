@@ -46,6 +46,13 @@ internal static partial class Log
     [LoggerMessage(23, LogLevel.Debug, "Sombra {Operacao}: cópia descartada ({Motivo})")]
     public static partial void SombraDescartada(ILogger logger, string operacao, string motivo);
 
+    [LoggerMessage(25, LogLevel.Warning,
+        "Sombra {Operacao}: divergência {Classe} trace {TraceId} decisão legado {DecisaoLegado} novo {DecisaoNovo} " +
+        "status legado {StatusLegado} sha256 legado {HashLegado} requisição {Requisicao}")]
+    public static partial void SombraCancelamentoDivergente(
+        ILogger logger, string operacao, string classe, string traceId, string decisaoLegado, string decisaoNovo,
+        int statusLegado, string hashLegado, string requisicao);
+
     [LoggerMessage(24, LogLevel.Error, "Sombra {Operacao}: falha interna na comparação ({Tipo})")]
     public static partial void SombraFalhaInterna(ILogger logger, string operacao, string tipo);
 }

@@ -68,6 +68,9 @@ services:
       Legado__Url: http://webservices:8080
       # Sem Novo__Url o modo `novo` cai no legado (fail-safe). Descomente quando o serviço novo atender o SOAP.
       # Novo__Url: http://nfse-novo:8080
+      # Porta interna do novo, só da fachada: avaliação sem escrita do CancelarNfse em modo sombra (ADR-0009, seção 3).
+      # Sem ela, a sombra do cancelamento descarta as cópias (sombra_descartadas_total{motivo="sem_url_interna"}).
+      # Novo__UrlInterna: http://nfse-novo:8081
       Fachada__ArquivoDeFlags: /config/flags/flags.json
       DOTNET_USE_POLLING_FILE_WATCHER: "true"
       # Vazio fecha os endpoints administrativos; o valor de desenvolvimento está em .env.example.
@@ -91,8 +94,10 @@ services:
       dockerfile: src/Nfse.Host/Dockerfile
     environment:
       <<: *dotnet-env
-      # Runtime do serviço novo (ADR-0002); ainda não usado pelo Host.
+      # Runtime do serviço novo (ADR-0002).
       ConnectionStrings__Oracle: "User Id=NFSE_MODERNO_APP;Password=${NFSE_MODERNO_APP_PASSWORD:-moderno_app_dev_123};Data Source=oracle:1521/FREEPDB1"
+      # Sombra do cancelamento: só leitura, sem EXECUTE no wrapper (ADR-0009). Porta interna 8081, só para a fachada.
+      ConnectionStrings__OracleSomenteLeitura: "User Id=NFSE_MODERNO_RO;Password=${NFSE_MODERNO_RO_PASSWORD:-moderno_ro_dev_123};Data Source=oracle:1521/FREEPDB1"
     ports:
       - "127.0.0.1:8090:8080"
     depends_on:

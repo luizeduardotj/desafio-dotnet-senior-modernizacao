@@ -21,6 +21,12 @@ public sealed class OpcoesNovo
 
     public Uri? Url { get; set; }
 
+    /// <summary>
+    /// Porta interna do novo, só para a fachada (ex.: <c>http://nfse-novo:8081</c>), onde fica
+    /// <c>POST /interno/sombra/cancelamento</c> (ADR-0009, seção 3). Sem ela, a sombra do cancelamento não roda.
+    /// </summary>
+    public Uri? UrlInterna { get; set; }
+
     public TimeSpan TimeoutLeitura { get; set; } = TimeSpan.FromSeconds(5);
 
     public TimeSpan TimeoutCancelamento { get; set; } = TimeSpan.FromSeconds(10);

@@ -52,11 +52,13 @@ builder.Services.AddSingleton<IFonteDeFlags, FonteDeFlagsPorConfiguracao>();
 builder.Services.AddSingleton<KillSwitchAdministrativo>();
 builder.Services.AddSingleton<EncaminhadorSoap>();
 
-// Sombra de leitura (ADR-0009): canal limitado, workers e clientes HTTP próprios, fora do caminho do cliente.
+// Sombra (ADR-0009): canal limitado, workers e clientes HTTP próprios, fora do caminho do cliente. Leituras são
+// repetidas no novo; o cancelamento só é avaliado, sem escrita, no endpoint interno do novo.
 builder.Services.AddSingleton(_ => ClientesDaSombra.Criar());
 builder.Services.AddSingleton<CanalDaSombra>();
 builder.Services.AddSingleton<PublicadorDaSombra>();
 builder.Services.AddSingleton<ComparadorDaSombra>();
+builder.Services.AddSingleton<AvaliadorDoCancelamento>();
 builder.Services.AddHostedService<TrabalhadorDaSombra>();
 builder.Services.AddSingleton<MedidoresDeEstado>();
 builder.Services.AddHealthChecks().AddCheck<FlagsCarregadasHealthCheck>("flags", tags: ["ready"]);

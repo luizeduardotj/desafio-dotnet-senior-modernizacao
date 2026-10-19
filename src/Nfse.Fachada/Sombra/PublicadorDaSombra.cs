@@ -18,13 +18,14 @@ public sealed class PublicadorDaSombra(
     ILogger<PublicadorDaSombra> logger)
 {
     /// <summary>
-    /// Só leituras: <c>CancelarNfse</c> nunca é copiado nesta etapa, mesmo em <c>sombra</c> e elegível, porque
-    /// executá-lo no novo cancelaria duas vezes (a sombra do cancelamento é a avaliação sem escrita da ADR-0009, seção 3).
+    /// Leituras exigem <c>Novo:Url</c>. <c>CancelarNfse</c> nunca é repetido em lugar nenhum: a cópia vai só à
+    /// avaliação sem escrita do novo (ADR-0009, seção 3), e sem <c>Novo:UrlInterna</c> a amostra é descartada
+    /// (<c>sem_url_interna</c>) depois do sorteio, para o descarte aparecer na métrica.
     /// </summary>
     public bool Copiavel(string operacao, Decisao decisao) =>
-        decisao.ElegivelParaSombra && OperacoesSoap.EhLeitura(operacao) && novo.CurrentValue.Url is not null;
+        decisao.ElegivelParaSombra && (!OperacoesSoap.EhLeitura(operacao) || novo.CurrentValue.Url is not null);
 
-    /// <param name="operacao">Operação de leitura, já conferida por <see cref="Copiavel"/>.</param>
+    /// <param name="operacao">Operação em escopo, já conferida por <see cref="Copiavel"/>.</param>
     /// <param name="amostragem"><c>Sombra.Amostragem</c> da operação (0..100).</param>
     /// <param name="requisicao">Corpo bufferizado; <c>null</c> se passou do limite.</param>
     /// <param name="captura">Captura da resposta do legado; <c>null</c> se não houve corpo para copiar.</param>
@@ -41,7 +42,11 @@ public sealed class PublicadorDaSombra(
         }
 
         string? motivo = null;
-        if (ctx.Features.Get<IForwarderErrorFeature>() is not null || ctx.RequestAborted.IsCancellationRequested)
+        if (!OperacoesSoap.EhLeitura(operacao) && novo.CurrentValue.UrlInterna is null)
+        {
+            motivo = "sem_url_interna";
+        }
+        else if (ctx.Features.Get<IForwarderErrorFeature>() is not null || ctx.RequestAborted.IsCancellationRequested)
         {
             motivo = "falha_legado";
         }

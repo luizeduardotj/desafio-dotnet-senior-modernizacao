@@ -1,4 +1,6 @@
-# Entrada do serviço novo: SOAP só da fachada; REST /api/v1 do ingress controller.
+# Entrada do serviço novo:
+#  - 8080: SOAP só da fachada; REST /api/v1 do ingress controller;
+#  - 8081 (interna): POST /interno/sombra/cancelamento só da fachada (ADR-0009, seção 3).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -19,4 +21,11 @@ spec:
               kubernetes.io/metadata.name: ingress-nginx
       ports:
         - port: 8080
+          protocol: TCP
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: fachada
+      ports:
+        - port: 8081
           protocol: TCP

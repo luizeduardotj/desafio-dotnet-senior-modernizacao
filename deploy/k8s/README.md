@@ -24,6 +24,7 @@ deploy/k8s/
 | ERP → SOAP (north-south) | Ingress `nfse-soap` → Service `fachada:8080` → `legado` (ExternalName) ou `nfse-novo:8080` |
 | App/portal → REST (north-south) | Ingress `nfse-rest` (`/api/v1`) → `nfse-novo:8080`, sem passar pela fachada |
 | Operação → kill switch nível 2 | namespace `nfse-operacao` → Service headless `fachada-admin:8081` (um IP por réplica) |
+| Fachada → sombra do cancelamento (east-west) | `nfse-novo:8081` (`POST /interno/sombra/cancelamento`), porta só da fachada ([ADR-0009](../../docs/adr/0009-sombra-escrita-unica-e-idempotencia.md), seção 3) |
 | `nfse-novo` → Oracle (east-west) | `oracle:1521` (ExternalName), usuários `NFSE_MODERNO_APP` e `NFSE_MODERNO_RO` |
 
 O Ingress SOAP tem `proxy-body-size: 0` (o legado não limita o corpo e a fachada também não), timeout de 120 s (acima do `Legado__Timeout` de 1 min 40 s, para quem corta ser a fachada) e `proxy-next-upstream: off` (um `CancelarNfse` não pode ser reenviado pelo ingress a outra réplica).
@@ -53,7 +54,8 @@ Mesmo padrão de probes, segurança e rollout. Diferenças:
 - **HPA por CPU** (70% do request, 2 a 6 réplicas; 3 a 6 em produção) **[H]**. O teto vem do Oracle, não do custo: `maxReplicas × Max Pool Size` precisa caber no orçamento de sessões combinado com o DBA (6 × 20 = 120). O Deployment não declara `replicas`, para o `apply` não brigar com o HPA.
 - **Secret `nfse-novo-oracle`** com duas connection strings: `ConnectionStrings__NfseModernoApp` (escreve só pelo `PKG_CANCELAMENTO_API`) e `ConnectionStrings__NfseModernoRo` (sombra). Os nomes das variáveis são o contrato proposto para o `Nfse.Host`, que ainda não lê nenhuma das duas.
 - **Readiness** em `/health/ready`, que deve checar o Oracle; a **liveness não checa o banco** (Oracle lento reiniciando todos os pods só piora o incidente).
-- NetworkPolicy: 8080 só da fachada (SOAP) e do `ingress-nginx` (REST).
+- NetworkPolicy: 8080 só da fachada (SOAP) e do `ingress-nginx` (REST); 8081 (interna, sombra do cancelamento) só da fachada.
+- A porta `interno` 8081 está no Deployment e no Service; o `Nfse.Host` precisa escutar nela o endpoint interno (ainda não configurado em `ASPNETCORE_HTTP_PORTS`).
 
 ## Flags e kill switch
 

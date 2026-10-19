@@ -67,7 +67,8 @@ public sealed class EncaminhadorSoap(
         else if (sombra.Copiavel(operacao, decisao))
         {
             // Sombra (ADR-0009): o cliente recebe o legado como sempre; o corpo é copiado no caminho (tee) e só depois
-            // da resposta se sorteia a amostragem e se publica a cópia. O novo é chamado pelos workers.
+            // da resposta se sorteia a amostragem e se publica a cópia. O novo é chamado pelos workers. No cancelamento o
+            // legado é chamado só esta vez, sem retry, e o novo só avalia a decisão, sem escrever (seção 3).
             using (CapturaDaResposta.Instalada captura = corpo is null ? default : CapturaDaResposta.Instalar(ctx, OpcoesSombra.LimiteDaResposta))
             {
                 noDestino = await EncaminharAoLegadoAsync(ctx, nome).ConfigureAwait(false);

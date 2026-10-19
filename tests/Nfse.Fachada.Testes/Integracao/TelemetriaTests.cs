@@ -171,7 +171,12 @@ public sealed class TelemetriaTests : IAsyncLifetime, IDisposable
 
         (await fachada.EnviarSoapAsync(OperacoesSoap.ConsultarNfse, Exemplos.Bytes("04e-consultar-nfse-por-tomador.xml"))).Dispose();
 
-        await SombraTests.Eventualmente(() => _medicoes.Count(m => m.Instrumento == "sombra_atraso") >= 2);
+        // Espera todas as medições verificadas: reexecução e descarte podem chegar depois do atraso das outras.
+        await SombraTests.Eventualmente(() =>
+            _medicoes.Count(m => m.Instrumento == "sombra_atraso") >= 2
+            && Tem("sombra_reexecucoes_total", ("operacao", "ConsultarNfseServicoTomado"), ("resultado", "divergiu"))
+            && Tem("sombra_divergencias_total", ("operacao", "ConsultarNfseServicoTomado"), ("classe", "nao_classificada"))
+            && Tem("sombra_descartadas_total", ("operacao", "ConsultarNfse"), ("motivo", "resposta_grande")));
         AssertContem("sombra_comparacoes_total", ("operacao", "ConsultarNfse"), ("resultado", "igual"));
         AssertContem("sombra_comparacoes_total", ("operacao", "ConsultarNfseServicoTomado"), ("resultado", "divergente"));
         AssertContem("sombra_divergencias_total", ("operacao", "ConsultarNfseServicoTomado"), ("classe", "nao_classificada"));
@@ -179,8 +184,10 @@ public sealed class TelemetriaTests : IAsyncLifetime, IDisposable
         AssertContem("sombra_atraso", ("operacao", "ConsultarNfse"));
         AssertContem("sombra_descartadas_total", ("operacao", "ConsultarNfse"), ("motivo", "resposta_grande"));
         Assert.All(_medicoes.Where(m => m.Instrumento == "sombra_atraso"), m => Assert.InRange(m.Valor, 0, 10));
-        Assert.DoesNotContain(_medicoes, m => m.Instrumento.StartsWith("sombra_", StringComparison.Ordinal) && m.Tags["operacao"] == OperacoesSoap.CancelarNfse);
     }
+
+    private bool Tem(string instrumento, params (string Chave, string Valor)[] tags) =>
+        _medicoes.ToArray().Any(m => m.Instrumento == instrumento && tags.All(t => m.Tags.TryGetValue(t.Chave, out string? v) && v == t.Valor));
 
     private void AssertContem(string instrumento, params (string Chave, string Valor)[] tags) =>
         Assert.True(

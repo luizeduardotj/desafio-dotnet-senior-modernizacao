@@ -30,6 +30,24 @@ internal static class TelemetriaDaSombra
         "sombra_atraso", unit: "s", description: "Do recebimento da requisição original ao fim da comparação.",
         advice: new InstrumentAdvice<double> { HistogramBucketBoundaries = [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60] });
 
+    /// <summary>
+    /// Trace próprio, ligado ao da requisição original por span link: a sombra não infla a duração do trace do cliente
+    /// (ADR-0012).
+    /// </summary>
+    public static Activity? IniciarSpan(CopiaDaSombra copia)
+    {
+        Activity.Current = null;
+        return Fonte.StartActivity(
+            ActivityKind.Internal, parentContext: default,
+            tags: [new("soap.operacao", copia.Operacao), new("migracao.modo", "sombra")],
+            links: copia.Origem == default ? null : [new ActivityLink(copia.Origem)],
+            name: "sombra " + copia.Operacao);
+    }
+
+    /// <summary><c>traceId</c> da requisição original, para o log; <c>-</c> sem trace.</summary>
+    public static string TraceIdDaOrigem(CopiaDaSombra copia) =>
+        copia.Origem == default ? "-" : copia.Origem.TraceId.ToHexString();
+
     /// <param name="igual">Corpo e status idênticos.</param>
     public static void ContarComparacao(string operacao, bool igual) =>
         Comparacoes.Add(1, Operacao(operacao), new("resultado", igual ? "igual" : "divergente"));
@@ -37,7 +55,10 @@ internal static class TelemetriaDaSombra
     public static void ContarDivergencia(string operacao, ClasseDeDivergencia classe) =>
         Divergencias.Add(1, Operacao(operacao), new("classe", ClassificadorDeDivergencia.Nome(classe)));
 
-    /// <param name="motivo"><c>canal_cheio</c>, <c>resposta_grande</c>, <c>requisicao_grande</c> ou <c>falha_legado</c>.</param>
+    /// <param name="motivo">
+    /// <c>canal_cheio</c>, <c>resposta_grande</c>, <c>requisicao_grande</c>, <c>falha_legado</c>,
+    /// <c>novo_nao_configurado</c> ou <c>sem_url_interna</c>.
+    /// </param>
     public static void ContarDescarte(string operacao, string motivo) =>
         Descartadas.Add(1, Operacao(operacao), new("motivo", motivo));
 

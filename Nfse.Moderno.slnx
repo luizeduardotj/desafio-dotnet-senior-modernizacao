@@ -11,6 +11,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Nfse.Adaptadores.Soap.Testes/Nfse.Adaptadores.Soap.Testes.csproj" />
+    <Project Path="tests/Nfse.Aplicacao.Testes/Nfse.Aplicacao.Testes.csproj" />
     <Project Path="tests/Nfse.Arquitetura.Testes/Nfse.Arquitetura.Testes.csproj" />
     <Project Path="tests/Nfse.Dominio.Testes/Nfse.Dominio.Testes.csproj" />
     <Project Path="tests/Nfse.Fachada.Testes/Nfse.Fachada.Testes.csproj" />

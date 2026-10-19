@@ -1,15 +1,18 @@
 using Microsoft.Extensions.Options;
 using Nfse.Fachada.Observabilidade;
+using Nfse.Fachada.Roteamento;
 
 namespace Nfse.Fachada.Sombra;
 
 /// <summary>
 /// Workers da sombra: <see cref="OpcoesSombra.Concorrencia"/> consumidores do canal, cada um com no máximo uma
-/// comparação em curso. No desligamento, o que estiver no canal é abandonado (a sombra não tem efeito persistente).
+/// comparação em curso. Cada cópia segue o caminho da operação: leitura repetida no novo e comparada
+/// (<see cref="ComparadorDaSombra"/>) ou cancelamento avaliado sem escrita (<see cref="AvaliadorDoCancelamento"/>). No desligamento, o que estiver no canal é abandonado (a sombra não tem efeito persistente).
 /// </summary>
 internal sealed class TrabalhadorDaSombra(
     CanalDaSombra canal,
     ComparadorDaSombra comparador,
+    AvaliadorDoCancelamento cancelamento,
     IOptions<OpcoesSombra> opcoes,
     ILogger<TrabalhadorDaSombra> logger) : BackgroundService
 {
@@ -24,7 +27,9 @@ internal sealed class TrabalhadorDaSombra(
             {
                 try
                 {
-                    await comparador.ProcessarAsync(copia, ct).ConfigureAwait(false);
+                    await (OperacoesSoap.EhLeitura(copia.Operacao)
+                        ? comparador.ProcessarAsync(copia, ct)
+                        : cancelamento.ProcessarAsync(copia, ct)).ConfigureAwait(false);
                 }
 #pragma warning disable CA1031 // um erro inesperado numa cópia não pode parar o worker
                 catch (Exception erro) when (erro is not OperationCanceledException || !ct.IsCancellationRequested)

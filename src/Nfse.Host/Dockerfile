@@ -16,7 +16,7 @@ RUN apk add --no-cache tzdata
 WORKDIR /app
 COPY --from=build /app .
 USER $APP_UID
-EXPOSE 8080
+EXPOSE 8080 8081
 HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=3 \
     CMD wget -q -O /dev/null http://127.0.0.1:8080/health/ready || exit 1
 ENTRYPOINT ["dotnet", "Nfse.Host.dll"]
