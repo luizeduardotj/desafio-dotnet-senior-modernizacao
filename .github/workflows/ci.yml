@@ -32,7 +32,10 @@ jobs:
       - name: Build (analyzers, warnings como erro)
         run: dotnet build Nfse.Moderno.slnx -c Release
       - name: Testes unitarios e de arquitetura
-        run: dotnet test Nfse.Moderno.slnx -c Release --no-build
+        run: dotnet test Nfse.Moderno.slnx -c Release --no-build --filter "Categoria!=Contrato"
+      - name: Testes de contrato (OpenAPI e SOAP)
+        # snapshot do /openapi/v1.json e forma das respostas SOAP contra tools/exemplos; regenerar: NFSE_ATUALIZAR_CONTRATO=1
+        run: dotnet test Nfse.Moderno.slnx -c Release --no-build --filter "Categoria=Contrato"
 
   compose:
     # Ambiente completo do zero (Oracle real com a carga do legado e o NFSE_MODERNO) e smoke test pela fachada.

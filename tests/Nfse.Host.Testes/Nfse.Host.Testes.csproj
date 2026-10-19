@@ -8,4 +8,9 @@
     <ProjectReference Include="../../src/Nfse.Host/Nfse.Host.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Pedidos e respostas reais do legado: a forma das respostas é o contrato SOAP (Contrato/ContratoSoapTests). -->
+    <None Include="../../tools/exemplos/*.xml" LinkBase="exemplos" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

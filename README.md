@@ -49,7 +49,8 @@ O legado não publica porta: só é alcançável pela fachada.
 ### Testes
 
 ```bash
-dotnet test Nfse.Moderno.slnx                     # unitários, arquitetura, fachada, host, contrato REST
+dotnet test Nfse.Moderno.slnx                     # unitários, arquitetura, fachada, host, contrato REST e SOAP
+dotnet test Nfse.Moderno.slnx --filter Categoria=Contrato   # só os testes de contrato
 dotnet test legado/tests/NotaCarioca.Testes -f net8.0
 
 # paridade com o golden master, com o compose de pé
@@ -57,6 +58,8 @@ export NFSE_PARIDADE_ORACLE="User Id=NFSE_MODERNO_APP;Password=moderno_app_dev_1
 export NFSE_PARIDADE_ORACLE_RO="User Id=NFSE_MODERNO_RO;Password=moderno_ro_dev_123;Data Source=127.0.0.1:1521/FREEPDB1"
 dotnet test tests/Nfse.Paridade.Testes
 ```
+
+Os testes de contrato (`Categoria=Contrato`, step próprio no CI) comparam o `/openapi/v1.json` do Host com o snapshot versionado em [tests/Nfse.Host.Testes/Contrato/openapi-v1.json](tests/Nfse.Host.Testes/Contrato/openapi-v1.json) e a forma das respostas SOAP (elementos, namespaces, ordem e códigos de erro) com as respostas reais do legado em [tools/exemplos](tools/exemplos). Mudança intencional na REST: `NFSE_ATUALIZAR_CONTRATO=1 dotnet test tests/Nfse.Host.Testes --filter Categoria=Contrato` regenera o snapshot, e o diff entra no PR.
 
 A paridade do cancelamento muda o banco, então exige a linha de base restaurada e o relógio congelado. O procedimento está em [tests/paridade/README.md](tests/paridade/README.md).
 
