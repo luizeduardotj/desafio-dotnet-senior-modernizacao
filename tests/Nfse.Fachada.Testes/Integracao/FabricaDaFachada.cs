@@ -18,6 +18,8 @@ internal sealed class FlagsFixas(FlagsDeMigracao? valor) : IFonteDeFlags
 {
     public FlagsDeMigracao? Valor { get; set; } = valor;
 
+    public string Nome => "fixas";
+
     public FlagsDeMigracao? Atual() => Valor;
 }
 

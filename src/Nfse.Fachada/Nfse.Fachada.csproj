@@ -3,6 +3,8 @@
   <ItemGroup>
     <PackageReference Include="Yarp.ReverseProxy" />
     <PackageReference Include="System.IO.Hashing" />
+    <PackageReference Include="OpenFeature" />
+    <PackageReference Include="OpenFeature.Contrib.Providers.Flagd" />
   </ItemGroup>
 
   <ItemGroup>

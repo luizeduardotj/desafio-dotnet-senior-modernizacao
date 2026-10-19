@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using Nfse.Fachada.Configuracao;
 using Nfse.Fachada.Observabilidade;
 
 namespace Nfse.Fachada.Flags;
@@ -14,6 +15,8 @@ public sealed class FonteDeFlagsPorConfiguracao(
     ILogger<FonteDeFlagsPorConfiguracao> logger) : IFonteDeFlags
 {
     private int _disponivel = -1; // -1 desconhecido, 0 não, 1 sim: loga só nas transições
+
+    public string Nome => OpcoesFlags.FonteArquivo;
 
     public FlagsDeMigracao? Atual()
     {

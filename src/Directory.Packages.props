@@ -6,6 +6,8 @@
     <!-- fachada (ADR-0008) -->
     <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
     <PackageVersion Include="System.IO.Hashing" Version="10.0.5" />
+    <PackageVersion Include="OpenFeature" Version="2.14.1" />
+    <PackageVersion Include="OpenFeature.Contrib.Providers.Flagd" Version="0.4.0" />
   </ItemGroup>
   <ItemGroup>
     <!-- observabilidade (ADR-0012) -->

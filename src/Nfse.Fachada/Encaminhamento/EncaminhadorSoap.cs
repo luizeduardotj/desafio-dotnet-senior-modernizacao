@@ -31,6 +31,7 @@ public sealed class EncaminhadorSoap(
         string modo = "legado"; // fora do escopo é sempre legado
         Decisao decisao;
         FlagsDeMigracao? flags = null;
+        string? fonteDasFlags = null;
         ReadOnlyMemory<byte>? corpo = null;
 
         if (!OperacoesSoap.EstaEmEscopo(operacao))
@@ -41,6 +42,7 @@ public sealed class EncaminhadorSoap(
         else
         {
             flags = fonteDeFlags.Atual();
+            fonteDasFlags = fonteDeFlags.Nome;
             bool killSwitchAdministrativo = killSwitch.Ativo(operacao);
             modo = flags is null ? "indisponivel" : Telemetria.NomeDoModo(flags.Da(operacao).Modo);
 
@@ -81,7 +83,7 @@ public sealed class EncaminhadorSoap(
         }
 
         TimeSpan total = Stopwatch.GetElapsedTime(inicio);
-        Telemetria.MarcarSpan(nome, modo, decisao);
+        Telemetria.MarcarSpan(nome, modo, decisao, fonteDasFlags);
         Telemetria.ContarRequisicao(nome, modo, decisao.Destino, ctx.Response.StatusCode);
         Telemetria.MedirOverhead(nome, total - noDestino);
         Log.Roteada(logger, nome, decisao.Destino, decisao.Motivo, ctx.Response.StatusCode, (long)total.TotalMilliseconds);

@@ -58,3 +58,33 @@ public sealed class OpcoesFachada
     /// <summary>Arquivo JSON com a seção <c>Migracao</c>, observado para recarga.</summary>
     public string ArquivoDeFlags { get; set; } = "flags.json";
 }
+
+/// <summary>Seção <c>Flags</c>: de onde vêm as flags de migração (README da fachada, seção Flags).</summary>
+public sealed class OpcoesFlags
+{
+    public const string Secao = "Flags";
+
+    public const string FonteArquivo = "arquivo";
+    public const string FonteOpenFeature = "openfeature";
+
+    /// <summary><c>arquivo</c> (seção <c>Migracao</c> do arquivo observado) ou <c>openfeature</c> (provider flagd).</summary>
+    public string Fonte { get; set; } = FonteArquivo;
+
+    public OpcoesFlagd Flagd { get; set; } = new();
+}
+
+/// <summary>
+/// Seção <c>Flags:Flagd</c>: endereço do sync do flagd (porta 8015), consumido em modo in-process. O que ficar vazio vem
+/// das variáveis <c>FLAGD_*</c> do provider (<c>FLAGD_HOST</c>, <c>FLAGD_PORT</c>, <c>FLAGD_SOURCE_SELECTOR</c>, ...).
+/// </summary>
+public sealed class OpcoesFlagd
+{
+    public string? Host { get; set; }
+
+    /// <summary>Porta do sync (gRPC <c>flagd.sync.v1</c>); vazia, <c>FLAGD_PORT</c> ou 8015.</summary>
+    [Range(1, 65535)]
+    public int? Porta { get; set; }
+
+    /// <summary>Fonte do flagd no modo in-process (ex.: <c>core.openfeature.dev/nfse/nfse-migracao</c>).</summary>
+    public string? Seletor { get; set; }
+}

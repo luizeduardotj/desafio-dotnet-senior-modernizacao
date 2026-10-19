@@ -38,7 +38,8 @@ public static class Telemetria
         "nfse_fallback_total", description: "Leituras (ou cancelamentos não enviados) que o novo não atendeu e foram ao legado.");
 
     /// <summary>Atributos do span da requisição.</summary>
-    public static void MarcarSpan(string operacao, string modo, Decisao decisao)
+    /// <param name="fonteDasFlags">Fonte que avaliou as flags (<c>arquivo</c>, <c>openfeature</c>); <c>null</c> fora do escopo, sem avaliação.</param>
+    public static void MarcarSpan(string operacao, string modo, Decisao decisao, string? fonteDasFlags)
     {
         Activity? atividade = Activity.Current;
         if (atividade is null)
@@ -50,6 +51,10 @@ public static class Telemetria
         atividade.SetTag("migracao.modo", modo);
         atividade.SetTag("migracao.destino", NomeDoDestino(decisao.Destino));
         atividade.SetTag("migracao.motivo_roteamento", decisao.Motivo.ToString());
+        if (fonteDasFlags is not null)
+        {
+            atividade.SetTag("migracao.fonte_flags", fonteDasFlags);
+        }
     }
 
     /// <param name="destino">Quem respondeu ao cliente (depois de um eventual fallback).</param>

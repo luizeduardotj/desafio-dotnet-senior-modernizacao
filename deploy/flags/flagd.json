@@ -1,0 +1,82 @@
+{
+  "$schema": "https://flagd.dev/schema/v0/flags.json",
+  "flags": {
+    "migracao.kill-switch": {
+      "state": "ENABLED",
+      "variants": {
+        "ligado": true,
+        "desligado": false
+      },
+      "defaultVariant": "desligado"
+    },
+    "ConsultarNfse.kill-switch": {
+      "state": "ENABLED",
+      "variants": {
+        "ligado": true,
+        "desligado": false
+      },
+      "defaultVariant": "desligado"
+    },
+    "ConsultarNfse.config": {
+      "state": "ENABLED",
+      "variants": {
+        "legado": {
+          "Modo": "legado",
+          "Percentual": 0,
+          "Inclusao": [],
+          "Exclusao": [],
+          "Sombra": {
+            "Amostragem": 0
+          }
+        }
+      },
+      "defaultVariant": "legado"
+    },
+    "ConsultarNfseServicoTomado.kill-switch": {
+      "state": "ENABLED",
+      "variants": {
+        "ligado": true,
+        "desligado": false
+      },
+      "defaultVariant": "desligado"
+    },
+    "ConsultarNfseServicoTomado.config": {
+      "state": "ENABLED",
+      "variants": {
+        "legado": {
+          "Modo": "legado",
+          "Percentual": 0,
+          "Inclusao": [],
+          "Exclusao": [],
+          "Sombra": {
+            "Amostragem": 0
+          }
+        }
+      },
+      "defaultVariant": "legado"
+    },
+    "CancelarNfse.kill-switch": {
+      "state": "ENABLED",
+      "variants": {
+        "ligado": true,
+        "desligado": false
+      },
+      "defaultVariant": "desligado"
+    },
+    "CancelarNfse.config": {
+      "state": "ENABLED",
+      "variants": {
+        "legado": {
+          "Modo": "legado",
+          "Percentual": 0,
+          "Inclusao": [],
+          "Exclusao": [],
+          "Sombra": {
+            "Amostragem": 0
+          }
+        }
+      },
+      "defaultVariant": "legado"
+    }
+  }
+}

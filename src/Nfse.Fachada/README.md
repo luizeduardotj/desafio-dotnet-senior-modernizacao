@@ -108,7 +108,10 @@ sequenceDiagram
 | `Novo__UrlInterna` | — | porta interna do novo (ex.: `http://nfse-novo:8081`), só da fachada; sem ela, a sombra do cancelamento descarta (`sem_url_interna`) |
 | `Novo__TimeoutLeitura` / `Novo__TimeoutCancelamento` | 5 s / 10 s | inatividade máxima na chamada ao novo |
 | `Fachada__Porta` | `8080` | porta pública |
-| `Fachada__ArquivoDeFlags` | `flags.json` | caminho relativo ao content root, ou absoluto |
+| `Flags__Fonte` | `arquivo` | `arquivo` (seção `Migracao` do arquivo abaixo) ou `openfeature` (flagd); outro valor impede a partida |
+| `Fachada__ArquivoDeFlags` | `flags.json` | caminho relativo ao content root, ou absoluto; só com `Flags__Fonte=arquivo` |
+| `Flags__Flagd__Host` / `Flags__Flagd__Porta` | `FLAGD_HOST` / `FLAGD_PORT`, senão `localhost` / `8015` | sync do flagd (in-process); só com `openfeature` |
+| `Flags__Flagd__Seletor` | `FLAGD_SOURCE_SELECTOR` | fonte do flagd a sincronizar (em produção, `core.openfeature.dev/nfse/nfse-migracao`); vazio, todas |
 | `Admin__Porta` | `8081` | porta interna dos endpoints administrativos |
 | `Admin__Token` | — | segredo do header `X-Admin-Token`; vazio fecha os endpoints |
 | `Sombra__CapacidadeDoCanal` | `1000` | cópias aguardando worker; lido na partida |
@@ -121,7 +124,9 @@ sequenceDiagram
 
 ## Flags
 
-Seção `Migracao` do arquivo de flags. O arquivo é observado e recarregado sem restart. Em volume montado num container, use `DOTNET_USE_POLLING_FILE_WATCHER=true` (polling a cada 4 s).
+Duas fontes, escolhidas por `Flags__Fonte`: o arquivo (`arquivo`, padrão, usado no compose e nos testes) e OpenFeature + flagd (`openfeature`, [abaixo](#openfeature--flagd), usado em produção). As duas montam o mesmo retrato, e o `DecisorDeDestino` não sabe de qual veio.
+
+No arquivo, as flags ficam na seção `Migracao`. O arquivo é observado e recarregado sem restart. Em volume montado num container, use `DOTNET_USE_POLLING_FILE_WATCHER=true` (polling a cada 4 s).
 
 ```json
 {
@@ -147,6 +152,42 @@ Seção `Migracao` do arquivo de flags. O arquivo é observado e recarregado sem
 - **Fail-safe:** com arquivo ausente, JSON inválido, valor que não converte (`"Modo": "talvez"`) ou percentual fora de 0..100, a fonte devolve `null`. Nesse caso tudo vai ao legado e `/health/ready` responde 503.
 
 No compose, as flags vêm de [`deploy/flags/flags.json`](../../deploy/flags/flags.json), montado em `/config/flags`: edite o arquivo e a fachada recarrega em até ~4 s, sem rebuild nem restart.
+
+### OpenFeature + flagd
+
+Com `Flags__Fonte=openfeature`, o mesmo retrato `FlagsDeMigracao` vem de flags OpenFeature avaliadas pelo provider flagd ([`FonteDeFlagsOpenFeature`](Flags/FonteDeFlagsOpenFeature.cs)), como decide a ADR-0008. É o que o overlay de produção do Kubernetes usa.
+
+| Chave OpenFeature | Tipo | Equivale, no arquivo, a |
+| --- | --- | --- |
+| `migracao.kill-switch` | booleano | `Migracao.KillSwitch` |
+| `<Operacao>.kill-switch` | booleano | `Operacoes.<Operacao>.KillSwitch` |
+| `<Operacao>.config` | objeto `{ Modo, Percentual, Inclusao, Exclusao, Sombra: { Amostragem } }` | o resto de `Operacoes.<Operacao>` |
+
+`<Operacao>` é `ConsultarNfse`, `ConsultarNfseServicoTomado` ou `CancelarNfse`. Por que este esquema:
+
+- **É o do `FeatureFlag` que já existia** em [`deploy/k8s/overlays/producao/flagd`](../../deploy/k8s/overlays/producao/flagd/featureflag.yaml). Nem o CR nem o `DecisorDeDestino` mudam: a fonte só monta o mesmo `FlagsDeMigracao` da fonte por arquivo.
+- **Kill switch em booleano à parte**: ligar é trocar o `defaultVariant` de uma flag, sem reescrever o objeto da operação. Desligar com pressa não passa por editar JSON.
+- **Um objeto por operação, não uma flag por campo**: modo, percentual e listas mudam juntos. Com flags separadas, uma mudança de `sombra` para `novo` com percentual poderia ser vista pela metade.
+
+Como a fonte funciona:
+
+- O provider roda em **modo in-process**: recebe o conjunto de flags pelo stream de sync do flagd (porta 8015, gRPC `flagd.sync.v1`) e avalia na própria fachada. Não há polling nem RPC por requisição. A cada evento do provider (pronto ou configuração alterada), a fonte reavalia as 7 flags fora do caminho da requisição e troca o retrato. `Atual()` só lê o retrato pronto.
+- O resolvedor RPC não é usado: na versão 0.4.0 do provider ele desiste do stream de eventos depois de 3 tentativas, e o retrato ficaria congelado sem erro (um kill switch não chegaria).
+- **Fail-safe idêntico ao do arquivo**: provider ainda sem retrato ou em erro (flagd fora, stream caído), flag ausente ou desabilitada, tipo errado, campo desconhecido no objeto, modo que não é `legado`/`sombra`/`novo`, percentual não inteiro ou fora de 0..100 → `null`. Tudo vai ao legado e `/health/ready` responde 503. O log sai só nas transições. Campo ausente no objeto fica no padrão, como no arquivo.
+- O erro do provider é acompanhado pelos eventos, não só pelo status do SDK: ao reconectar, o flagd in-process emite apenas "configuração alterada", e o status do SDK continuaria em erro. Configuração recebida faz a fonte voltar a valer.
+- O span de cada requisição em escopo leva `migracao.fonte_flags` (`arquivo` ou `openfeature`), junto de `migracao.modo`.
+
+No compose, o flagd é opcional (profile `flagd`) e serve [`deploy/flags/flagd.json`](../../deploy/flags/flagd.json), que espelha o `flags.json` no formato do flagd e é observado pelo próprio flagd:
+
+```bash
+FACHADA_FLAGS_FONTE=openfeature docker compose --profile flagd up -d
+```
+
+Edite `deploy/flags/flagd.json` (por exemplo, o `defaultVariant` de `migracao.kill-switch` para `ligado`). O flagd publica a mudança no stream e a fachada a aplica em segundos. Para conferir o que o flagd está servindo:
+
+```bash
+curl -s -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8013/flagd.evaluation.v1.Service/ResolveAll
+```
 
 ## Kill switch nível 2
 
@@ -191,7 +232,7 @@ curl           -H "X-Admin-Token: $TOKEN" http://fachada:8081/admin/kill-switch 
 
 ## TODO
 
-- [ ] **OpenFeature + flagd** (ADR-0008): implementar `IFonteDeFlags` sobre `OpenFeature` com o provider flagd (sync por watch). Ficam valendo o mesmo retrato `FlagsDeMigracao`, o fail-safe para `null` e o atributo no span a cada avaliação. Hoje a fonte é `FonteDeFlagsPorConfiguracao` (arquivo observado).
+- [x] **OpenFeature + flagd** (ADR-0008): `FonteDeFlagsOpenFeature`, com o provider flagd in-process (sync por stream), o mesmo retrato `FlagsDeMigracao`, o fail-safe para `null` e `migracao.fonte_flags` no span ([OpenFeature + flagd](#openfeature--flagd)). Falta cronometrar o kill switch pelo flagd (alvo < 10 s) e uma métrica por avaliação de flag (hoje a avaliação aparece no span e no `migracao_modo_info`).
 - [x] **OpenTelemetry** (ADR-0012): tracing, métricas e logs exportados por OTLP, `fachada_overhead`, span filho da chamada ao destino (instrumentação do HttpClient) e os gauges `migracao_modo_info` e `kill_switch_ativo`.
 - [ ] Resultado `erro_negocio` (resposta 200 com `ListaMensagemRetorno`): a sombra já captura o corpo e lê os códigos (`XmlSoap.CodigosDeRetorno`), mas só nas operações em `sombra`.
 - [ ] Pseudonimização (HMAC) de documentos e IMs num processador de logs (ADR-0012). A sombra já pseudonimiza o pedido no registro da divergência; o processador vale como defesa para logs novos.

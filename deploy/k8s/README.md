@@ -61,30 +61,26 @@ Mesmo padrão de probes, segurança e rollout. Diferenças:
 
 ### O que existe hoje
 
-A fachada lê **um arquivo** de flags (`FonteDeFlagsPorConfiguracao`, ver [src/Nfse.Fachada/README.md](../../src/Nfse.Fachada/README.md)). Nos dois overlays esse arquivo vem do ConfigMap `fachada-flags` (gerado de [base/fachada/flags.json](base/fachada/flags.json), M0: tudo em `legado`), montado como diretório em `/etc/nfse/flags`, com `DOTNET_USE_POLLING_FILE_WATCHER=true`:
+No overlay **local**, a fachada lê **um arquivo** de flags (`FonteDeFlagsPorConfiguracao`, ver [src/Nfse.Fachada/README.md](../../src/Nfse.Fachada/README.md)). Em produção ela lê o flagd (seção seguinte). O arquivo vem do ConfigMap `fachada-flags` (gerado de [base/fachada/flags.json](base/fachada/flags.json), M0: tudo em `legado`), montado como diretório em `/etc/nfse/flags`, com `DOTNET_USE_POLLING_FILE_WATCHER=true`:
 
 - sem hash no nome (`disableNameSuffixHash`): mudar as flags **não** reinicia os pods; o kubelet troca o arquivo e a fachada recarrega;
 - diretório e não `subPath`: `subPath` nunca recebe atualização;
 - o tempo até todas as réplicas verem a mudança é o período de sync do kubelet mais o cache do ConfigMap (**dezenas de segundos a ~1–2 min**), mais até 4 s do polling. É exatamente por isso que a ADR-0008 diz que ConfigMap **não serve** como nível 1 do kill switch. Aqui ele é o caminho para **ligar** modos (por PR revisado), não para desligar com pressa.
 
-### O que o overlay de produção acrescenta, e o que ainda não está ligado
+### O que o overlay de produção acrescenta: flagd
 
-`overlays/producao/flagd/` sobe um **flagd** (2 réplicas, PDB, RBAC só de leitura) que observa o CRD `FeatureFlag` `nfse-migracao` por watch na API do Kubernetes. O CR já tem as flags no formato do flagd: `migracao.kill-switch`, `<Operacao>.kill-switch` e `<Operacao>.config`.
+`overlays/producao/flagd/` sobe um **flagd** (2 réplicas, PDB, RBAC só de leitura) que observa o CRD `FeatureFlag` `nfse-migracao` por watch na API do Kubernetes. O CR tem as flags no formato do flagd: `migracao.kill-switch`, `<Operacao>.kill-switch` e `<Operacao>.config`.
 
-**A fachada ainda não consome o flagd.** Nada nos manifests finge o contrário: não há variável `FLAGD_*` na fachada, e o nível 1 em produção, até o próximo passo, continua sendo o ConfigMap (lento). Enquanto isso, **o caminho rápido real é o nível 2**.
+A fachada de produção consome o flagd (`Flags__Fonte=openfeature` no `fachada-config` do overlay): `FonteDeFlagsOpenFeature` com o provider flagd em **modo in-process**, no stream de sync do Service `flagd:8015`, com seletor `core.openfeature.dev/nfse/nfse-migracao`. A avaliação roda na própria fachada (sem RPC por requisição, cabe no orçamento de ≤ 10 ms) e cada mudança do CR chega pelo stream, em segundos. O mapeamento do CR para `FlagsDeMigracao` e o fail-safe estão no [README da fachada](../../src/Nfse.Fachada/README.md#openfeature--flagd).
 
-Próximo passo (TODO da fachada, ADR-0008):
-
-1. `IFonteDeFlags` sobre OpenFeature com o provider flagd em **modo in-process** apontando para `flagd:8015` (sync): a avaliação roda na própria fachada (sem RPC por requisição, cabe no orçamento de ≤ 10 ms) e o último retrato continua valendo se o flagd cair.
-2. Mapear o CR para o mesmo `FlagsDeMigracao`, com o fail-safe para `null` (tudo ao legado) se o provider não tiver retrato.
-3. Adicionar `FLAGD_HOST`/`FLAGD_PORT`/`FLAGD_RESOLVER=in-process` ao `fachada-config` de produção e medir o drill (< 10 s).
-4. Só então tirar o ConfigMap `fachada-flags` do overlay de produção.
+- **flagd fora ou stream caído:** o provider emite erro e a fachada passa a mandar tudo ao legado, com `/health/ready` 503 (fail-safe da ADR-0008), até o sync voltar (o provider tenta de novo com backoff de até 60 s). Ver o risco de readiness abaixo.
+- O ConfigMap `fachada-flags` continua montado também em produção, mas **sem efeito** enquanto a fonte for `openfeature`. Falta: medir o drill do nível 1 (< 10 s) e então tirar o ConfigMap do overlay.
 
 ### Mapeamento para os níveis do plano (seção 8)
 
 | Nível | Hoje, nestes manifests | Comando |
 | --- | --- | --- |
-| **1** flag `kill-switch` | ConfigMap `fachada-flags` (lento, ver acima). Em produção o CR do flagd está pronto, mas sem consumidor | `kubectl -n nfse edit configmap fachada-flags` (`"KillSwitch": true`), ou alterar `base/fachada/flags.json` e aplicar |
+| **1** flag `kill-switch` | Produção: CR `FeatureFlag` `nfse-migracao`, pelo flagd (segundos). Local: ConfigMap `fachada-flags` (lento, ver acima) | produção: `kubectl -n nfse patch featureflag nfse-migracao ...` (comando no topo de [`featureflag.yaml`](overlays/producao/flagd/featureflag.yaml)); local: `kubectl -n nfse edit configmap fachada-flags` (`"KillSwitch": true`) |
 | **2** `POST /admin/kill-switch` por réplica | Service headless `fachada-admin`, liberado só para `nfse-operacao` | script abaixo |
 | **3** break-glass | componente `components/break-glass` troca o backend do Ingress `nfse-soap` para o Service `legado` | ver abaixo |
 | **4** rollback de versão | `kubectl rollout undo` no overlay local; em produção, `kubectl argo rollouts abort/undo` (e a análise aborta sozinha) | `kubectl argo rollouts -n nfse undo fachada` |
@@ -140,13 +136,13 @@ kubectl kustomize deploy/k8s/overlays/local
 
 ## Riscos conhecidos
 
-- **Readiness e fail-safe das flags.** `/health/ready` responde 503 quando as flags não carregam. Se um `flags.json` inválido chegar a **todas** as réplicas, o Service `fachada` fica sem endpoints e o SOAP inteiro cai, embora o fail-safe da fachada mandasse tudo ao legado. O readiness por flags é útil na subida do pod, não depois. Proposta para a fachada: falhar o `ready` só até a primeira carga válida e, depois disso, expor a falha por métrica e alerta. Até lá, validar o JSON no CI antes de aplicar.
+- **Readiness e fail-safe das flags.** `/health/ready` responde 503 quando as flags não carregam. Se um `flags.json` inválido chegar a **todas** as réplicas, o Service `fachada` fica sem endpoints e o SOAP inteiro cai, embora o fail-safe da fachada mandasse tudo ao legado. Com o flagd em produção o risco cresce: **flagd fora** também tira as flags de todas as réplicas de uma vez. O readiness por flags é útil na subida do pod, não depois. Proposta para a fachada: falhar o `ready` só até a primeira carga válida e, depois disso, expor a falha por métrica e alerta. Até lá, validar o JSON no CI antes de aplicar.
 - **Desligamento corta chamadas longas ao legado.** O grace period é 30 s (o `ShutdownTimeout` padrão do host .NET); uma chamada ao legado mais longa que ~25 s é cortada quando o pod sai. Leituras (5 s) e cancelamento (10 s) no novo cabem.
 - O NetworkPolicy do `nfse-novo` libera o `ingress-nginx` na porta inteira; quem restringe a `/api/v1` é o Ingress, não a política (NetworkPolicy não vê caminho HTTP).
 
 ## Validação
 
-Não havia `kubectl`, `kustomize` nem `kubeconform` na máquina em que estes manifests foram escritos, e nenhum foi instalado. A validação feita foi estrutural (todo arquivo YAML é válido, toda referência de `resources`/`patches`/`files`/`components` existe, todo objeto tem `apiVersion`, `kind` e `metadata.name`). **`kubectl kustomize` dos dois overlays não foi executado.** Para fechar:
+Não havia `kubectl`, `kustomize` nem `kubeconform` na máquina em que estes manifests foram escritos, e nenhum foi instalado. A validação feita foi estrutural (todo arquivo YAML é válido, toda referência de `resources`/`patches`/`files`/`components` existe, todo objeto tem `apiVersion`, `kind` e `metadata.name`). Depois, `kubectl kustomize` dos dois overlays foi executado sem erro (ao ligar a fachada ao flagd); `kubeconform` não. Para fechar:
 
 ```bash
 kubectl kustomize deploy/k8s/overlays/local | kubeconform -strict -summary -

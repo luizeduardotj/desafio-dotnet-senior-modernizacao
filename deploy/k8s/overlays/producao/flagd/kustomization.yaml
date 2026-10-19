@@ -1,6 +1,5 @@
-# flagd servindo o CRD FeatureFlag por watch (ADR-0008, alvo do nível 1 do kill switch).
-# ATENÇÃO: a fachada AINDA NÃO consome o flagd. Ela lê o arquivo do ConfigMap fachada-flags até o
-# IFonteDeFlags sobre OpenFeature existir (src/Nfse.Fachada/README.md, TODO). Ver deploy/k8s/README.md.
+# flagd servindo o CRD FeatureFlag por watch (ADR-0008, nível 1 do kill switch). A fachada de produção
+# consome o sync (8015) em modo in-process (Flags__Fonte=openfeature no fachada-config). Ver deploy/k8s/README.md.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

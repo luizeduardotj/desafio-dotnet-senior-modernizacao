@@ -48,7 +48,26 @@ builder.Services.Configure<FlagsDeMigracao>(builder.Configuration.GetSection(Fla
 builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<MatcherPolicy, PortaDoEndpointMatcherPolicy>());
 builder.Services.AddHttpForwarder();
 builder.Services.AddSingleton(_ => ClientesDeEncaminhamento.Criar());
-builder.Services.AddSingleton<IFonteDeFlags, FonteDeFlagsPorConfiguracao>();
+builder.Services.AddOptions<OpcoesFlags>().BindConfiguration(OpcoesFlags.Secao).ValidateDataAnnotations().ValidateOnStart();
+var opcoesFlags = builder.Configuration.GetSection(OpcoesFlags.Secao).Get<OpcoesFlags>() ?? new();
+switch (opcoesFlags.Fonte.Trim().ToLowerInvariant())
+{
+    case OpcoesFlags.FonteArquivo:
+        builder.Services.AddSingleton<IFonteDeFlags, FonteDeFlagsPorConfiguracao>();
+        break;
+    case OpcoesFlags.FonteOpenFeature:
+        // OpenFeature + flagd (ADR-0008): o retrato é refeito a cada evento do provider, fora do caminho da requisição.
+        builder.Services.AddSingleton(sp => new FonteDeFlagsOpenFeature(
+            ProvedorFlagd.Criar(opcoesFlags.Flagd, sp.GetRequiredService<ILoggerFactory>().CreateLogger(nameof(ProvedorFlagd))),
+            FonteDeFlagsOpenFeature.DominioPadrao,
+            sp.GetRequiredService<ILogger<FonteDeFlagsOpenFeature>>()));
+        builder.Services.AddSingleton<IFonteDeFlags>(sp => sp.GetRequiredService<FonteDeFlagsOpenFeature>());
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<FonteDeFlagsOpenFeature>());
+        break;
+    default:
+        throw new InvalidOperationException($"Flags:Fonte inválida: {opcoesFlags.Fonte} (arquivo ou openfeature).");
+}
+
 builder.Services.AddSingleton<KillSwitchAdministrativo>();
 builder.Services.AddSingleton<EncaminhadorSoap>();
 

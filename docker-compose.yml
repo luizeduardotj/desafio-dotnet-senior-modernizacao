@@ -72,6 +72,10 @@ services:
       Novo__UrlInterna: http://nfse-novo:8081
       Fachada__ArquivoDeFlags: /config/flags/flags.json
       DOTNET_USE_POLLING_FILE_WATCHER: "true"
+      # Fonte das flags: `arquivo` (padrão, flags.json acima) ou `openfeature` (flagd, sobe com `--profile flagd`).
+      Flags__Fonte: ${FACHADA_FLAGS_FONTE:-arquivo}
+      Flags__Flagd__Host: flagd
+      Flags__Flagd__Porta: "8015"
       # Vazio fecha os endpoints administrativos; o valor de desenvolvimento está em .env.example.
       Admin__Token: ${FACHADA_ADMIN_TOKEN:-}
     ports:
@@ -85,6 +89,18 @@ services:
         condition: service_healthy
       otel-lgtm:
         condition: service_healthy
+
+  # flagd opcional (ADR-0008): `FACHADA_FLAGS_FONTE=openfeature docker compose --profile flagd up -d`. Serve
+  # deploy/flags/flagd.json, observado pelo próprio flagd; a fachada recebe as mudanças pelo stream de sync (8015).
+  flagd:
+    image: ghcr.io/open-feature/flagd:v0.11.1
+    profiles: ["flagd"]
+    command: ["start", "--uri", "file:/config/flags/flagd.json", "--port", "8013", "--management-port", "8014", "--sync-port", "8015"]
+    ports:
+      # Avaliação por HTTP, só para conferir as flags de fora (README da fachada).
+      - "127.0.0.1:8013:8013"
+    volumes:
+      - ./deploy/flags:/config/flags:ro
 
   nfse-novo:
     image: nfse-novo:${NFSE_VERSAO:-0.1.0}

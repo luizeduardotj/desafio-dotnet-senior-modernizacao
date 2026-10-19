@@ -37,6 +37,12 @@ configMapGenerator:
     behavior: merge
     literals:
       - NFSE_AMBIENTE=producao
+      # Flags pelo flagd (ADR-0008): provider in-process no stream de sync do Service flagd, fonte = o CR
+      # FeatureFlag nfse-migracao. O ConfigMap fachada-flags continua montado, mas sem efeito aqui (ver README).
+      - Flags__Fonte=openfeature
+      - Flags__Flagd__Host=flagd
+      - Flags__Flagd__Porta=8015
+      - Flags__Flagd__Seletor=core.openfeature.dev/nfse/nfse-migracao
   - name: nfse-novo-config
     behavior: merge
     literals:
