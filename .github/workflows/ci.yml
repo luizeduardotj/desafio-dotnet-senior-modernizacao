@@ -6,14 +6,29 @@ on:
   pull_request:
 
 jobs:
-  build:
+  legado:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          # global.json fixa o SDK 10, que também compila net8.0; o 8.0 fica para o runtime dos testes
+          dotnet-version: |
+            8.0.x
+            10.0.x
       - name: Build (net48 + net8.0)
         run: dotnet build legado/NotaCarioca.sln -c Release
       - name: Testes unitarios (net8.0)
         run: dotnet test legado/tests/NotaCarioca.Testes -c Release -f net8.0 --no-build
+
+  moderno:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Build (analyzers, warnings como erro)
+        run: dotnet build Nfse.Moderno.slnx -c Release
+      - name: Testes unitarios e de arquitetura
+        run: dotnet test Nfse.Moderno.slnx -c Release --no-build
