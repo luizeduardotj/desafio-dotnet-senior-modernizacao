@@ -160,6 +160,7 @@ src/Nfse.Adaptadores.Rest   API /api/v1
 src/Nfse.Host               composição do serviço novo
 db/moderno                  schema NFSE_MODERNO: usuários, views e wrapper
 tests/paridade              golden master: 47 casos capturados do legado
+tests/carga                 teste de carga k6, legado × novo pela fachada
 deploy/                     flags, dashboards do Grafana e manifests Kubernetes (Kustomize)
 docs/                       ADRs, plano de migração, spike de premissas, enunciado
 legado/, db/0*, tools/      monolito original (inalterado)
@@ -167,10 +168,10 @@ legado/, db/0*, tools/      monolito original (inalterado)
 
 ## O que eu faria com mais tempo
 
-- **Medir antes de afirmar.** Rodar o M0 do plano (fachada em pass-through em produção) e um teste de carga k6, legado × novo, para trocar as hipóteses **[H]** das ADRs por números medidos: orçamento da fachada, timeouts, amostragem e limites de rollback.
+- **Medir antes de afirmar.** Rodar o M0 do plano (fachada em pass-through em produção) para trocar as hipóteses **[H]** das ADRs por números de produção: orçamento da fachada, timeouts, amostragem e limites de rollback. O teste k6 local ([tests/carga](tests/carga/README.md)) só mostra que o novo não piora a cauda e aguenta mais carga que o legado no mesmo hardware.
 - **Rodar os testes contra Oracle 19c.** O ambiente local é 23ai, e os códigos de erro já se mostraram diferentes (`ORA-41900` × `ORA-01031`, `ORA-00054` × `ORA-30006`).
-- **Ligar o CI de verdade.** O job que sobe o compose e roda a paridade nunca rodou, porque o repositório não tinha remote durante o desenvolvimento. Faltam também a paridade do cancelamento no CI, com `FIXED_DATE`, e a validação dos manifests com `kubeconform` e um cluster kind com Argo Rollouts.
-- **Cronometrar o kill switch pelo flagd.** A fachada de produção já lê as flags do flagd ([ADR-0008](docs/adr/0008-fachada-yarp-roteamento-e-flags.md)); falta o drill (< 10 s até 100% no legado) para então tirar o ConfigMap de flags do overlay de produção.
+- **Completar o CI.** O CI roda build, testes, compose e paridade das leituras e da sombra do cancelamento. Faltam a paridade do cancelamento com `FIXED_DATE` e a validação dos manifests com `kubeconform`. O overlay local já foi aplicado e testado em k3d ([deploy/k8s](deploy/k8s/README.md#validação)); o de produção, com Argo Rollouts e flagd, ainda não subiu em cluster.
+- **Tirar o ConfigMap de flags do overlay de produção.** O kill switch pelo flagd já foi medido no compose (0,4 s até 100% no legado); falta repetir o drill no cluster antes de remover o arquivo de flags como fonte.
 - **Aplicar a correção do trigger da guia**, depois da aprovação da Fazenda, com o relatório de reconciliação das guias em aberto ([ADR-0005](docs/adr/0005-correcao-do-trigger-de-recalculo-da-guia.md)).
 - **Cobrir o que o seed não exercita:** C13 (competência posterior à emissão) e C15 (colisão CPF × CNPJ) precisam de massa própria.
 - **Testes de resiliência automatizados** com Oracle lento ou fora do ar. Hoje os casos de novo lento e fora do ar são cobertos só nos testes da fachada.

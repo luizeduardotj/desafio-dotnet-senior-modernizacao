@@ -7,3 +7,4 @@ TestResults/
 tools/saida/
 tools/lotes/
 .env
+.k3d-nfse.kubeconfig

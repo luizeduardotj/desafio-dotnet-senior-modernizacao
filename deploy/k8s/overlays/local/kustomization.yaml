@@ -1,5 +1,6 @@
-# kind/k3d na máquina do desenvolvedor. Legado e Oracle continuam no docker compose da raiz,
-# fora do cluster, como em produção. Imagens carregadas com `kind load docker-image`.
+# k3d na máquina do desenvolvedor, ligado à rede do docker compose da raiz. Legado, Oracle e otel-lgtm
+# continuam no compose, fora do cluster, como em produção; o k3d injeta os nomes da rede no CoreDNS.
+# Passo a passo em deploy/k8s/README.md.
 #   kubectl apply -k deploy/k8s/overlays/local
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -33,32 +34,32 @@ configMapGenerator:
   - name: fachada-config
     behavior: merge
     literals:
-      # otel-lgtm do compose, publicado no host.
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4317
+      # otel-lgtm do compose, pela rede compartilhada.
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-lgtm:4317
       - NFSE_AMBIENTE=local
   - name: nfse-novo-config
     behavior: merge
     literals:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-lgtm:4317
       - NFSE_AMBIENTE=local
 
 patches:
-  # Legado e Oracle do docker compose, alcançados pelo host (Docker Desktop resolve host.docker.internal
-  # dentro dos nós do kind). As portas do compose estão em 127.0.0.1; ver README se não conectar.
+  # Legado e Oracle pelos nomes dos serviços do compose. Não dá para usar host.docker.internal: o legado
+  # não publica porta no host e o Oracle só escuta em 127.0.0.1.
   - target:
       kind: Service
       name: legado
     patch: |-
       - op: replace
         path: /spec/externalName
-        value: host.docker.internal
+        value: webservices
   - target:
       kind: Service
       name: oracle
     patch: |-
       - op: replace
         path: /spec/externalName
-        value: host.docker.internal
+        value: oracle
   - target:
       kind: Ingress
     patch: |-

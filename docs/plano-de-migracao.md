@@ -225,3 +225,4 @@ Toda mudança de fase, degrau, limite ou risco aceito entra aqui por PR, com dat
 | --- | --- | --- | --- | --- |
 | 2026-10-16 | todas | versão inicial do plano, todos os limites **[H]** | — | time de modernização |
 | 2026-10-19 | todas | kill switch nível 1 pelo flagd medido no compose: 0,4 s até 100% no legado; mudança de modo em 1,6 s **[M]** (alvo < 10 s) | `src/Nfse.Fachada/README.md` | time de modernização |
+| 2026-10-19 | leituras | k6 no compose local, legado × novo pela fachada: sem fila, p99 do novo 0,36× (ConsultarNfse) e 0,58× (ServicoTomado) o do legado; a 20 + 5 req/s o legado satura e o novo não **[M]**. Não substitui a medida do M0 em produção | `tests/carga/README.md` | time de modernização |

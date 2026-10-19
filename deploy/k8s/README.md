@@ -13,7 +13,7 @@ deploy/k8s/
 ├── components/
 │   └── break-glass/              nível 3: nfse-soap aponta direto para o legado
 └── overlays/
-    ├── local/                    kind/k3d; Secrets gerados com valores de teste
+    ├── local/                    k3d na rede do compose; Secrets gerados com valores de teste
     └── producao/                 Argo Rollouts + análise, ExternalSecrets, flagd + FeatureFlag
 ```
 
@@ -110,28 +110,40 @@ Isso é o rollout das **versões** da fachada e do serviço novo. **Não é o st
 - A análise roda em segundo plano desde o primeiro degrau e compara **canário × estável** na mesma janela, com os limites do plano (§6.1, §9): taxa de 5xx até +0,1 p.p. e p99 até 1,2 × o estável. A comparação é relativa porque os `soap:Fault` intencionais (C20) também são 500. Sem tráfego, o resultado fica inconclusivo e o rollout pausa: não se promove às cegas.
 - Premissas da análise **[H]**: os serviços exportam `http.server.request.duration` por OTLP (TODO de OpenTelemetry na fachada e no serviço novo), o OTel Collector anexa o label de pod `rollouts-pod-template-hash` (`k8sattributes`) e `service.name` vira `job` no Prometheus. Até isso existir, a análise fica inconclusiva e todo rollout pausa para decisão humana.
 
-## Como aplicar no kind
+## Como aplicar no k3d
 
-Pré-requisitos: kind ou k3d com Kubernetes ≥ 1.30 (`preStop.sleep`, `matchLabelKeys`), ingress-nginx e um CNI que aplique NetworkPolicy (sem isso as políticas são aceitas e ignoradas; no kind, confira a versão do kindnet ou use Calico). O legado e o Oracle sobem pelo `docker compose up` da raiz.
+Pré-requisitos: k3d ≥ 5.6 (Kubernetes ≥ 1.30, por `preStop.sleep` e `matchLabelKeys`) e o `docker compose up` da raiz de pé. O cluster entra na **rede do compose**: o legado, o Oracle e o otel-lgtm ficam no compose, fora do cluster, como em produção, e o k3d injeta os nomes dessa rede no CoreDNS. Por isso o overlay local aponta `legado` → `webservices`, `oracle` → `oracle` e o OTLP para `otel-lgtm:4317`. `host.docker.internal` não serve: o legado não publica porta no host e o Oracle só escuta em `127.0.0.1`.
 
-```bash
-docker compose up -d
-kind create cluster --name nfse
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.11.3/deploy/static/provider/kind/deploy.yaml
-kind load docker-image nfse-fachada:dev nfse-novo:dev --name nfse
-kubectl create namespace nfse-operacao
-kubectl apply -k deploy/k8s/overlays/local
-kubectl -n nfse rollout status deploy/fachada
-```
-
-Para ver o resultado gerado sem cluster:
+Os comandos usam um kubeconfig próprio, para não mexer no contexto padrão:
 
 ```bash
-kubectl kustomize deploy/k8s/overlays/local
+export KUBECONFIG=$PWD/.k3d-nfse.kubeconfig
 ```
 
-- O overlay local aponta `legado` e `oracle` para `host.docker.internal`. As portas do compose estão publicadas em `127.0.0.1`; no Docker Desktop isso alcança o host. Se não alcançar (Linux, Colima), conecte o nó do kind à rede do compose (`docker network connect <projeto>_default nfse-control-plane`) e troque o `externalName` para `webservices`/`oracle`.
-- O host do Ingress local é `nfse.localhost`.
+```bash
+k3d cluster create nfse --network desafio-dotnet-senior-modernizacao_default --kubeconfig-update-default=false --kubeconfig-switch-context=false --wait
+```
+
+```bash
+k3d kubeconfig get nfse > $KUBECONFIG
+```
+
+```bash
+docker tag nfse-fachada:0.1.0 nfse-fachada:dev && docker tag nfse-novo:0.1.0 nfse-novo:dev && k3d image import nfse-fachada:dev nfse-novo:dev -c nfse
+```
+
+```bash
+kubectl apply -k deploy/k8s/overlays/local && kubectl -n nfse rollout status deploy/fachada
+```
+
+```bash
+kubectl -n nfse port-forward svc/fachada 18080:8080
+```
+
+O SOAP responde em `http://127.0.0.1:18080/NfseWS.asmx`. Para ver o YAML gerado sem cluster: `kubectl kustomize deploy/k8s/overlays/local`.
+
+- O k3d traz o Traefik, e os Ingress pedem `ingressClassName: nginx`. Para exercitar o Ingress, crie o cluster com `--k3s-arg "--disable=traefik@server:0"` e instale o ingress-nginx. Sem isso, use o port-forward.
+- O namespace do pod precisa cumprir o Pod Security `restricted` (`nfse` é `enforce`), e a NetworkPolicy da fachada só aceita tráfego do `ingress-nginx` (8080) e do `nfse-operacao` (8081). Um gerador de carga dentro do cluster precisa de securityContext completo e de uma política que libere o namespace dele.
 - O Secret local tem valores de teste (`token-admin-local-dev`; senhas `*_dev_123`, que precisam ser as passadas a `db/moderno/01_usuarios.sql`).
 
 ## Riscos conhecidos
@@ -142,11 +154,23 @@ kubectl kustomize deploy/k8s/overlays/local
 
 ## Validação
 
-Não havia `kubectl`, `kustomize` nem `kubeconform` na máquina em que estes manifests foram escritos, e nenhum foi instalado. A validação feita foi estrutural (todo arquivo YAML é válido, toda referência de `resources`/`patches`/`files`/`components` existe, todo objeto tem `apiVersion`, `kind` e `metadata.name`). Depois, `kubectl kustomize` dos dois overlays foi executado sem erro (ao ligar a fachada ao flagd); `kubeconform` não. Para fechar:
+**Cluster k3d, 2026-10-19 [M]** (k3d 5.9, k3s 1.36, Docker Desktop com 8 CPUs; passo a passo acima):
+
+| O que | Resultado |
+| --- | --- |
+| `kubectl apply -k overlays/local` | todos os objetos criados; Pod Security `restricted` aceitou fachada e nfse-novo; 2 + 2 réplicas prontas |
+| SOAP pela fachada, modo `legado` | `ConsultarNfse` 200 pelo legado do compose |
+| Troca para `novo` pelo ConfigMap | ~36 s até o kubelet trocar o arquivo no pod, mais até 4 s do polling; depois disso, 6 de 6 respostas pelo novo (`nfse_requisicoes_total{destino="novo"}`), byte a byte iguais às do legado. Confirma a seção [Flags e kill switch](#flags-e-kill-switch): ConfigMap liga modos, não desliga com pressa |
+| `rollout restart` da fachada e do novo sob carga (k6 dentro do cluster, 10 + 1 req/s) | p99 de 119 ms (ConsultarNfse) e 874 ms (ServicoTomado); **2 de 662** `connection refused` |
+| O mesmo `rollout restart` da fachada sem as NetworkPolicies | **0 de 661** falhas |
+
+As duas falhas vêm do controlador de NetworkPolicy do k3s (kube-router): ele libera o IP do pod novo depois que o pod já está pronto e recebendo tráfego, e o pacote é rejeitado. Repetiu nas duas rodadas com política e não apareceu sem ela. Não mudei os manifests por isso, porque o comportamento é do CNI: em produção, repetir o teste com o CNI do cluster (Cilium ou Calico) antes de confiar em zero erro no rollout. Se repetir lá, a correção é um `initialDelaySeconds` no readiness da fachada maior que o tempo de programação da política.
+
+`kubectl kustomize` dos dois overlays roda sem erro. `kubeconform` ainda não foi rodado:
 
 ```bash
 kubectl kustomize deploy/k8s/overlays/local | kubeconform -strict -summary -
 kubectl kustomize deploy/k8s/overlays/producao | kubeconform -strict -summary -ignore-missing-schemas -
 ```
 
-Em produção, `-ignore-missing-schemas` cobre os CRDs (Rollout, AnalysisTemplate, ExternalSecret, FeatureFlag), que não estão no catálogo padrão do kubeconform.
+Em produção, `-ignore-missing-schemas` cobre os CRDs (Rollout, AnalysisTemplate, ExternalSecret, FeatureFlag), que não estão no catálogo padrão do kubeconform. O overlay de produção (Argo Rollouts, flagd, External Secrets) não foi aplicado em cluster.
