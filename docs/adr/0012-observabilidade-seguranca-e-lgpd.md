@@ -26,6 +26,20 @@ Os dados trafegados incluem CPF de pessoas físicas (tomadores) e razão social;
 - A sombra roda em trace **ligado** (span link) ao da requisição original, para não inflar a latência do trace do cliente.
 - No novo: spans de ASP.NET Core, HttpClient e Oracle (instrumentação OpenTelemetry do ODP.NET), com o SQL sem valores de bind.
 
+#### Legado instrumentado por fora (opcional)
+
+A decisão acima continua valendo: os critérios de fase usam o que a fachada mede, e o legado não muda. Como complemento (2026-10-19), o container do legado leva a **auto-instrumentação OpenTelemetry .NET** (`opentelemetry-dotnet-instrumentation` v1.17.0, zip e SHA-256 fixados no `Dockerfile` da raiz). Nenhuma linha de C# ou VB.NET muda, e o `legado/` também não.
+
+- **Ligada só pelo ambiente.** A imagem leva o agente dormente. O compose liga com `CORECLR_ENABLE_PROFILING`, `CORECLR_PROFILER`, `CORECLR_PROFILER_PATH`, `DOTNET_STARTUP_HOOKS`, `DOTNET_ADDITIONAL_DEPS` e `DOTNET_SHARED_STORE`, e exporta como `OTEL_SERVICE_NAME=nfse-legado` para o mesmo otel-lgtm. Sem essas variáveis, o processo é o de produção. Em produção (.NET Framework 4.8 no IIS), o equivalente é o instalador Windows do mesmo projeto, com `COR_*`: é deploy de infraestrutura, sem release do legado, e fica para depois do M0, se a fachada não bastar.
+- **O que aparece:** span de servidor do ASP.NET Core (filho do span de cliente da fachada, pelo `traceparent`), spans do ODP.NET (`Fill(DataTable)` e `SendExecuteRequest`, com `db.system=oracle` e o número de linhas), logs do ASP.NET Core no Loki com `trace_id`, e a métrica `http.server.request.duration` com `service_name=nfse-legado`. O dashboard ganhou o painel **Legado: p99 visto pela fachada × medido dentro do legado**. O legado não conhece a operação SOAP (ela vem no `SOAPAction`), então a curva dele soma todas as operações.
+- **LGPD:** `OTEL_DOTNET_AUTO_ORACLEMDA_SET_DBSTATEMENT_FOR_TEXT=false` fica explícito (é o padrão): `db.statement` não sai, e os valores de bind nunca saem. A propagação de contexto até o servidor Oracle (`..._DATABASE_OPENTELEMETRY_TRACING`) fica desligada, porque exige Oracle 26ai. Nenhum cabeçalho é capturado, o corpo SOAP não entra em span e `url.query` sai redigida. O legado só escreve no console com `Console.WriteLine`, que o agente não exporta. Resta um risco aceito: o log `Request starting` do ASP.NET Core leva a query string. O SOAP só usa `?wsdl`, mas um cliente que pusesse documento na URL o mandaria ao Loki.
+- **Verificado no compose [M]** (2026-10-19, arm64, máquina compartilhada com outros ambientes):
+  - 42 de 42 traces de `ConsultarNfse` pela fachada vieram com os três níveis (fachada → legado → Oracle) no mesmo `trace_id`;
+  - nenhum dos CPFs/CNPJs/IMs dos exemplos `04*`/`05` apareceu em 159 traces nem nos logs do Loki;
+  - a resposta do `04` continuou igual à do exemplo;
+  - imagem cerca de 20 MB maior.
+  - A documentação da v1.17.0 diz que a instrumentação `ORACLEMDA` não suporta ARM64, mas os spans vêm do `ActivitySource` do próprio ODP.NET 23.x e apareceram em arm64.
+
 ### Métricas (Prometheus/OTLP)
 
 | Métrica | Labels | Uso |
@@ -93,6 +107,8 @@ Os limites exatos estão no [plano de migração](../plano-de-migracao.md).
 | Rollback se p99 do novo > 1,2 × p99 do legado por 15 min | [H] | variação natural do p99 do legado medida no M0 |
 | Rollback se taxa de `fault` do novo > legado + 0,1 p.p. | [H] | taxa de fault do legado medida no M0 |
 | Bloqueia avanço se descartes da sombra > 1% | [H] | capacidade do canal no teste de carga |
+| Legado: 85% do tempo de `ConsultarNfse` no Oracle (mediana de 42 traces) | [M] compose local, 2026-10-19 | M0 em produção, se o legado for instrumentado lá |
+| Rede + fila entre a chamada da fachada e o servidor do legado: 7 ms p50, 49 ms p95 (42 traces) | [M] compose local, 2026-10-19, máquina sob carga | M0 |
 
 ## Alternativas consideradas
 

@@ -816,6 +816,84 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "id": 15,
+      "type": "row",
+      "title": "Legado instrumentado por fora (opcional, ADR-0012)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 47,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Legado: p99 visto pela fachada × medido dentro do legado",
+      "description": "Fachada: nfse_duracao{destino=\"legado\"}, a chamada ao legado vista de fora. Legado: http.server.request.duration da auto-instrumentação OpenTelemetry (service_name=nfse-legado), POST /NfseWS.asmx. O legado não sabe a operação SOAP (vem no cabeçalho SOAPAction), então a curva dele soma todas: compare com o filtro de operação em All, ou com tráfego de uma operação só. A diferença entre as curvas é rede, fila do Kestrel e conexão.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "stacking": {
+              "mode": "none"
+            },
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(nfse_duracao_seconds_bucket{destino=\"legado\",operacao=~\"$operacao\"}[$__rate_interval])))",
+          "legendFormat": "vista pela fachada",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name=\"nfse-legado\",http_route=\"/NfseWS.asmx\",http_request_method=\"POST\"}[$__rate_interval])))",
+          "legendFormat": "dentro do legado (todas as operações)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B"
+        }
+      ]
     }
   ]
 }

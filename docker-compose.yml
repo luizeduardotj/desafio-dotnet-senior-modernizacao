@@ -44,6 +44,21 @@ services:
       TZ: America/Sao_Paulo
       ASPNETCORE_URLS: http://+:8080
       NFSE_CONNECTION_STRING: "User Id=NFSE_OWNER;Password=${NFSE_OWNER_PASSWORD:-nfse_dev_123};Data Source=oracle:1521/FREEPDB1;Min Pool Size=2;Connection Timeout=30"
+      # Auto-instrumentação OpenTelemetry (ADR-0012, "Legado instrumentado por fora"): o agente vem na imagem e só liga
+      # com estas variáveis; sem elas o legado roda como em produção. Nenhuma linha do legado muda.
+      <<: *dotnet-env
+      OTEL_SERVICE_NAME: nfse-legado
+      OTEL_DOTNET_AUTO_HOME: /otel-dotnet-auto
+      CORECLR_ENABLE_PROFILING: "1"
+      CORECLR_PROFILER: "{918728DD-259F-4A6A-AC2B-B85E1B658318}"
+      CORECLR_PROFILER_PATH: /otel-dotnet-auto/native/OpenTelemetry.AutoInstrumentation.Native.so
+      DOTNET_ADDITIONAL_DEPS: /otel-dotnet-auto/AdditionalDeps
+      DOTNET_SHARED_STORE: /otel-dotnet-auto/store
+      DOTNET_STARTUP_HOOKS: /otel-dotnet-auto/net/OpenTelemetry.AutoInstrumentation.StartupHook.dll
+      # LGPD: SQL fora do span (é o padrão; fica explícito para ninguém ligar sem ler a ADR) e nenhum cabeçalho capturado.
+      OTEL_DOTNET_AUTO_ORACLEMDA_SET_DBSTATEMENT_FOR_TEXT: "false"
+      # Propagar o contexto até o servidor exige Oracle 26ai; o 19c de produção e o 23ai local não usam.
+      OTEL_DOTNET_AUTO_ORACLEMDA_DATABASE_OPENTELEMETRY_TRACING: "false"
     mem_limit: 3g
     expose:
       - "8080"

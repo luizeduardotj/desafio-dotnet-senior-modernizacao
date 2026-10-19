@@ -22,6 +22,7 @@ flowchart LR
     N -- views e wrapper --> M[(NFSE_MODERNO)] --> O
     NI -- só leitura --> M
     F & N -- OTLP --> G[otel-lgtm: Tempo, Prometheus, Loki, Grafana]
+    L -. OTLP, auto-instrumentação .-> G
 ```
 
 ## Como rodar
@@ -107,6 +108,18 @@ Foi o que este roteiro mostrou no compose:
 | `sombra` no `CancelarNfse` (06e) | `SOAP CancelarNfse -> Legado (Sombra) status 200` | avaliação sem escrita no novo: `igual` |
 
 No Grafana, o dashboard **Migração por operação** mostra as requisições por destino e resultado, o p99 de cada lado, os fallbacks e a linha **Sombra** (comparações, divergências por classe, descartes e atraso). Cada requisição tem trace no Tempo, com o span da fachada e o span filho do destino; os logs carregam `TraceId`.
+
+O legado também aparece no trace, sem nenhuma linha de código alterada: o container dele leva a auto-instrumentação OpenTelemetry .NET (v1.17.0, fixada no [Dockerfile](Dockerfile)), que o compose liga por variável de ambiente ([ADR-0012](docs/adr/0012-observabilidade-seguranca-e-lgpd.md#legado-instrumentado-por-fora-opcional)). Um `ConsultarNfse` pela fachada fica assim no Tempo (busque `{resource.service.name="nfse-legado"}` ou abra um trace da fachada):
+
+```text
+[nfse-fachada] POST /NfseWS.asmx                 server  soap.operacao, migracao.*
+  [nfse-fachada] POST                            client  webservices:8080
+    [nfse-legado] POST /NfseWS.asmx              server  traceparent recebido da fachada
+      [nfse-legado] Fill(DataTable)              client  db.system=oracle, sem SQL
+        [nfse-legado] SendExecuteRequest         client  ida e volta ao Oracle
+```
+
+Os logs do ASP.NET Core do legado chegam ao Loki com o mesmo `trace_id`. Nenhum span ou log leva SQL, corpo SOAP, cabeçalho ou documento (conferido com os CPFs/CNPJs/IMs dos exemplos). O painel **Legado: p99 visto pela fachada × medido dentro do legado** compara a chamada vista de fora com o tempo medido dentro do processo. Numa amostra local de 42 consultas **[M]**, o legado gastou 85% do tempo no Oracle (mediana), e rede mais fila entre a chamada da fachada e o servidor do legado ficaram em 7 ms (mediana). Com o agente desligado (sem as variáveis `CORECLR_*`/`DOTNET_STARTUP_HOOKS`), o legado roda como em produção.
 
 > `tools/exemplos/executar.sh` sem argumentos também envia o lote (`01`) e o cancelamento (`06`), que mudam o banco.
 
