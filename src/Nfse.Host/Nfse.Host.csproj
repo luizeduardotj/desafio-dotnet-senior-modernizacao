@@ -1,5 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
+  <PropertyGroup>
+    <!-- Só desenvolvimento: chave do `dotnet user-jwts` para testar a API REST localmente (README). -->
+    <UserSecretsId>28c2a8f9-bbde-4f47-a1f0-0e57cd51a4c8</UserSecretsId>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
