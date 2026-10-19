@@ -52,6 +52,24 @@ modo == novo:
     senão                                   → legado
 ```
 
+```mermaid
+flowchart TD
+    R[POST /NfseWS.asmx] --> A{SOAPAction em escopo?}
+    A -- não --> L[legado, streaming, sem ler o corpo]
+    A -- sim --> K{kill switch?}
+    K -- sim --> L
+    K -- não --> M{modo da operação}
+    M -- legado --> L
+    M -- sombra --> S[legado responde] -.cópia amostrada.-> SN[novo avalia fora do caminho]
+    M -- novo --> C{chave extraída?}
+    C -- não --> X{novo 100%?}
+    X -- sim --> N[novo]
+    X -- não --> L
+    C -- sim --> I{lista de inclusão ou hash abaixo do percentual}
+    I -- sim --> N
+    I -- não --> L
+```
+
 - O hash é **determinístico entre processos e réplicas**: `xxHash64(operação + "|" + chave) % 100` (nunca `string.GetHashCode`, que é aleatório por processo, nem o HMAC de pseudonimização, cuja chave é rotacionada). O mesmo prestador cai sempre no mesmo lado, o que mantém a paginação coerente e respeita a escrita única ([ADR-0009](0009-sombra-escrita-unica-e-idempotencia.md)).
 - **Semântica do percentual por modo:**
 
@@ -85,6 +103,15 @@ Meta: a fachada adiciona **≤ 5 ms no p99** em operações fora do escopo e **�
 ### Ponto único de falha
 
 A fachada é sem estado e sem banco. Rota de contorno documentada: ingress aponta direto para o legado (*break-glass*), testada no plano de migração. **Depois do desligamento de uma operação no monolito** ([ADR-0001](0001-estrategia-strangler-fig-e-ordem-de-extracao.md)), o break-glass deixa de cobrir essa operação; por isso o desligamento é um ponto sem volta explícito no plano.
+
+### Números desta ADR
+
+| Valor | Origem | Onde calibrar |
+| --- | --- | --- |
+| Corpo bufferizado até 1 MiB | [H] | maior request real das três operações é de poucos KB (exemplos); conferir a distribuição de tamanho no M0 |
+| Overhead ≤ 5 ms (fora do escopo) e ≤ 10 ms (em escopo) no p99 | [H] | teste de carga legado direto × via fachada |
+| Timeouts 5 s (leituras) e 10 s (cancelamento) | [H] | acima do p99.9 do legado medido no M0; os ERPs não têm timeout conhecido |
+| Kill switch < 10 s até 100% no legado | [H] | drill cronometrado no compose e no kind |
 
 ## Alternativas consideradas
 

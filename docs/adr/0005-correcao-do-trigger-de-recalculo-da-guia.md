@@ -31,6 +31,15 @@ END;
 
 Restrições: mudanças no legado devem ser mínimas, justificadas em ADR e compatíveis com Oracle 19c; não alterar tabelas do legado.
 
+### Premissas e nível de verificação
+
+| # | Premissa | Fonte | Nível | Como confirmar | Se for falsa |
+| --- | --- | --- | --- | --- | --- |
+| P1 | O defeito existe (premissa P2 da ADR-0003) | inferência | lida (inferência) | teste K07 | esta ADR é arquivada |
+| P2 | Consultar `NFSE` no `AFTER STATEMENT` de um compound trigger não dispara `ORA-04091` | documentação Oracle 11g+ | lida | teste de integração do novo trigger | usar tabela temporária global como alternativa |
+| P3 | Segurar o lock de `GUIAS` até o commit não causa deadlock com o lote | — | hipótese | teste de carga lote + cancelamento na mesma competência | ordenar as operações ou manter o recálculo do lote fora da transação |
+| P4 | Não há notas com `COMPETENCIA` nula em produção | coluna nullable em `db/01_schema.sql:71` | desconhecida | consulta no 19c antes da aplicação | o novo trigger falha como o antigo (`ORA-01400`); tratar antes |
+
 ## Decisão proposta
 
 Substituir o trigger por um **compound trigger** (disponível desde o 11g, compatível com 19c) que coleta as competências afetadas por linha e recalcula **uma vez por competência, ao fim do comando, na mesma transação**, sem `PRAGMA` e sem `COMMIT`:
@@ -80,6 +89,14 @@ A deduplicação é **obrigatória**: sem ela, um cancelamento em massa de N not
 ### Implantação
 
 Independente da migração: pode ser aplicado antes, durante ou depois, sem relação com as flags da fachada. Recomendação: aplicar **antes** de `CancelarNfse` entrar em `novo`, para que a sombra e o canário rodem já sobre o comportamento definitivo, ou **depois** de `novo` 100%, nunca no meio de um canário.
+
+## Fora deste ADR
+
+| Pendência | Dono | Trava |
+| --- | --- | --- |
+| Aprovação de negócio para mudar o valor das guias | Fazenda / área de arrecadação | a aplicação desta ADR |
+| Verificação de notas com `COMPETENCIA` nula em produção (premissa P4) | DBA | a aplicação desta ADR |
+| Tratamento de guias já pagas a maior | Fazenda | nada técnico; fora do escopo da migração |
 
 ## Alternativas consideradas
 

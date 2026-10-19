@@ -24,6 +24,20 @@ Fatos (leitura de `db/03_pkg_nfse.sql:67-120`, `db/04_triggers.sql`, `db/02_pkg_
 6. **`recalcular_guia` é idempotente** (MERGE com valor função do estado commitado).
 7. No C#, o `Commit` é incondicional e a releitura de `DT_CANCELAMENTO` acontece **depois** do commit, fora da transação (`CancelamentoNfseServico.cs:49-50`): uma falha nesse ponto devolve Fault 500 ao ERP com o cancelamento já efetivado.
 
+### Premissas e nível de verificação
+
+| # | Premissa | Fonte | Nível | Como confirmar | Se for falsa |
+| --- | --- | --- | --- | --- | --- |
+| P1 | Ordem das regras `E050` → já cancelada → `E051` → `E052` → `E053` | `db/03_pkg_nfse.sql:77-112` | lida | golden master K02 | — |
+| P2 | O trigger autônomo não desconta a nota que está sendo cancelada (K07) | `db/04_triggers.sql:9-12` + semântica de transação autônoma | lida (inferência) | teste de integração K07: cancelar e ler a guia | a ADR-0005 perde o objeto; K07 sai do catálogo |
+| P3 | O `PRAGMA` existe para contornar `ORA-04091` | comentário de 2019 no trigger | hipótese | não precisa: não muda a decisão | — |
+| P4 | Dois cancelamentos simultâneos produzem dois `UPDATE` (K08) | `db/03_pkg_nfse.sql:78-119`, sem lock | lida (inferência) | teste de concorrência contra a procedure direta | o lock do wrapper continua inofensivo |
+| P5 | O `COMMIT` autônomo persiste mesmo com rollback do chamador, inclusive criando guia | `db/02_pkg_guia.sql:29-31`, `db/04_triggers.sql:12` | lida (inferência) | teste: cancelar, `ROLLBACK`, contar guias | — |
+| P6 | `recalcular_guia` é idempotente | `db/02_pkg_guia.sql:16-31` | lida | chamar duas vezes e comparar `VALOR_ISS` | — |
+| P7 | A competência é sempre o dia 1 do mês | `ProcessadorLoteRps.cs:146`; seeds com `TRUNC(...,'MM')` | lida | `SELECT COUNT(*) FROM NFSE WHERE COMPETENCIA <> TRUNC(COMPETENCIA,'MM')` = 0 | a regra de prazo do domínio precisa replicar `ADD_MONTHS` sobre a data exata |
+| P8 | O `SYSDATE` de produção está em horário de São Paulo | `docker-compose.yml:5` (só o ambiente local) | **desconhecida para produção** | perguntar ao DBA do 19c (`SELECT DBTIMEZONE, SESSIONTIMEZONE`, fuso do SO) | o prazo do dia 10 já vira em outro horário hoje; preservar, documentar como K03 |
+| P9 | `SELECT ... FOR UPDATE` sobre tabela de outro schema funciona com `SELECT` direto ao dono do wrapper | documentação Oracle | lida | teste de integração do wrapper | grant de `LOCK` específico ou mover o lock para dentro de uma view com `SELECT` |
+
 ## Decisão
 
 ### 1. O PL/SQL continua sendo a única autoridade de escrita
@@ -59,6 +73,26 @@ BEGIN
 END;                                                   -- COMMIT é do chamador (.NET), uma única vez
 ```
 
+```mermaid
+sequenceDiagram
+    participant N as Serviço novo (.NET)
+    participant W as NFSE_MODERNO.PKG_CANCELAMENTO_API
+    participant P as NFSE_OWNER.PKG_NFSE
+    participant T as TRG_NFSE_SITUACAO_GUIA
+    N->>W: cancelar(prestador, número, motivo)
+    W->>W: SELECT ... FOR UPDATE WAIT 5 (snapshot + SYSDATE)
+    W->>P: cancelar_nfse(...)
+    alt regra permite
+        P->>P: UPDATE NFSE SET SITUACAO = 'C'
+        P-->>T: dispara (transação autônoma, COMMIT próprio)
+    else E050..E053 ou já cancelada
+        P-->>W: código (sem UPDATE)
+    end
+    W-->>N: código, snapshot, agora, DT_CANCELAMENTO
+    N->>N: dual-run: PoliticaDeCancelamento(snapshot, agora) == código?
+    N->>N: COMMIT (uma vez)
+```
+
 (O `SELECT` em `GUIAS` usa o privilégio `READ` do dono; só `NFSE` precisa de `SELECT` para o `FOR UPDATE`.)
 
 - O wrapper **não reimplementa nenhuma regra**. Ele só acrescenta, no caminho novo:
@@ -90,6 +124,22 @@ A migração não muda resultado de negócio. A correção é uma mudança separ
 ### 5. Fora de escopo
 
 `gerar_nfse`, `PKG_GUIA` e o cálculo de ISS continuam exclusivos do legado. O serviço novo não recalcula ISS: exibe `VALOR_ISS` gravado.
+
+### Números desta ADR
+
+| Valor | Origem | Onde calibrar |
+| --- | --- | --- |
+| `FOR UPDATE WAIT 5` (5 s de espera pelo lock) | [H] | menor que o orçamento do cancelamento ([ADR-0007](0007-arquitetura-do-servico-novo.md)); medir espera real no teste de concorrência |
+| Janela de 2 s para `fronteira_relogio` no dual-run | [H] | precisão de `DATE` é 1 s; 2 s cobre duas leituras de `SYSDATE`; rever com as divergências reais |
+| Motivo truncado em 255 | [L] | `db/03_pkg_nfse.sql:117` |
+| Prazo até o dia 10 do mês seguinte | [E] + [L] | manual e `db/03_pkg_nfse.sql:98` |
+
+## Fora deste ADR
+
+| Pendência | Dono | Trava |
+| --- | --- | --- |
+| Fuso e relógio do `SYSDATE` em produção (premissa P8) | DBA | a sombra de `CancelarNfse` |
+| Aposentadoria do PL/SQL como autoridade | time de modernização + Fazenda | nada nesta migração; exige guia extraída e dual-run zerado |
 
 ## Alternativas consideradas
 

@@ -66,6 +66,13 @@ O **orçamento de tempo do cancelamento** fica abaixo do timeout da fachada (10 
 | Event sourcing / mensageria | não há evento de domínio consumido por ninguém nesta fase |
 | `DateTime.Now` no domínio | o instante vem do banco ([ADR-0003](0003-regras-de-cancelamento-em-plsql.md)) |
 
+### Números desta ADR
+
+| Valor | Origem | Onde calibrar |
+| --- | --- | --- |
+| Orçamento do cancelamento: lock 5 s + `CommandTimeout` 3 s, abaixo dos 10 s da fachada | [H] | p99 real do `cancelar_nfse` no teste de carga |
+| Período ≤ 31 dias | [E] | manual de integração |
+
 ## Alternativas consideradas
 
 - **.NET 8.** Rejeitada: fim de suporte em novembro de 2026.

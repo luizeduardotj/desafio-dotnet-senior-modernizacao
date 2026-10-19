@@ -20,6 +20,15 @@ Obstáculos ao determinismo:
 - cancelamentos mudam o estado: rodar legado e novo no mesmo banco contamina o segundo;
 - `db/06_seed_volume.sql` (2 milhões de notas) leva minutos.
 
+### Premissas e nível de verificação
+
+| # | Premissa | Fonte | Nível | Como confirmar | Se for falsa |
+| --- | --- | --- | --- | --- | --- |
+| P1 | `FIXED_DATE` congela `SYSDATE` (não `SYSTIMESTAMP`) | documentação Oracle | lida | spike: `SELECT SYSDATE` após o `ALTER SYSTEM` | plano B descrito abaixo |
+| P2 | `FIXED_DATE` tem efeito dentro do PDB `FREEPDB1` | — | **desconhecida** | spike no primeiro dia | definir no CDB, ou plano B |
+| P3 | Com `FIXED_DATE`, o seed `01`–`05` é determinístico | `db/05_seed_base.sql:44` é a única leitura de relógio; não usa `DBMS_RANDOM` | lida | carregar duas vezes e comparar `NFSE` e `GUIAS` | normalizar campos no golden master |
+| P4 | Uma imagem com o seed já aplicado pode ser criada e reutilizada no CI | imagem `gvenzl/oracle-free` | hipótese | spike: `docker commit` após o init, ou volume pré-carregado | carregar o seed a cada job (mais lento, sem o volume de 2 milhões) |
+
 ## Decisão
 
 ### Determinismo do banco

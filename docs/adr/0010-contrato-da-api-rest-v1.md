@@ -74,6 +74,15 @@ O domínio não conhece esses códigos: o mapeamento é do adaptador REST, como 
 
 Gerado pelo próprio serviço (`Microsoft.AspNetCore.OpenApi`), com exemplos e todos os ProblemDetails documentados; publicado como artefato do CI.
 
+### Números desta ADR
+
+| Valor | Origem | Onde calibrar |
+| --- | --- | --- |
+| Período máximo de 31 dias, inclusivo | [E] | manual de integração |
+| `limite` padrão 50, máximo 100 | 50 [E], 100 [H] | 50 vem do manual; 100 conforme uso do app/portal |
+| Convivência de 6 meses entre versões | [H] | ciclo de release do app e do portal |
+| Motivo ≤ 255 bytes | [L] | `db/01_schema.sql:84` (semântica de bytes) |
+
 ## Alternativas consideradas
 
 - **Versionar por header ou media type.** Rejeitada: menos visível para clientes novos e para cache/observabilidade, sem benefício aqui.

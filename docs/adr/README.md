@@ -4,7 +4,22 @@ Formato: [MADR](https://adr.github.io/madr/) adaptado, em português. Toda ADR s
 
 **Contexto → Decisão → Alternativas consideradas → Consequências → Reversão → Como verificar**
 
-As duas últimas seções são obrigatórias. Uma decisão sem caminho de volta ou sem teste/métrica que a comprove não é aceita.
+As duas últimas seções são obrigatórias. Uma decisão sem caminho de volta ou sem teste/métrica que a comprove não é aceita. Quando a decisão deixa algo em aberto, a ADR tem também **Fora deste ADR**, dizendo o que cada pendência bloqueia.
+
+## Origem dos números
+
+Não temos dados de produção do Nota Carioca. Para não confundir hipótese com medição, todo número de limite, prazo ou meta traz a origem:
+
+| Marca | Significa | Exemplo |
+| --- | --- | --- |
+| **[E]** | exigido pelo enunciado ou pelo manual de integração | 50 notas por página, 31 dias |
+| **[L]** | comportamento do legado, lido no código | `ROWNUM`, `SUBSTR(...,255)` |
+| **[H]** | hipótese do time; o texto diz onde será calibrada (M0, teste de carga, drill) | orçamento de 10 ms da fachada |
+| **[M]** | medido (no ambiente local, no teste de carga ou em produção), com data e fonte | — ainda nenhum |
+
+## Nível de verificação das premissas
+
+Até aqui, **todas as premissas vêm de leitura estática** do código e do PL/SQL; nada foi executado contra o Oracle. As ADRs 0002, 0003, 0005 e 0011 listam suas premissas com o nível atual (**lida no código**, **confirmada por teste**, **refutada**) e o teste que a confirma. Uma premissa só sobe de nível com teste no CI.
 
 ## Índice
 

@@ -28,7 +28,14 @@ Fatos que restringem a estratégia:
    1. `ConsultarNfse` — leitura pura, valida de ponta a ponta fachada, sombra, camada anticorrupção, paridade e observabilidade com risco mínimo.
    2. `ConsultarNfseServicoTomado` — reaproveita o mesmo caminho de leitura e a mesma serialização (`CompNfse`); pode entrar em sombra enquanto a anterior está em canário.
    3. `CancelarNfse` — só entra em sombra quando `ConsultarNfse` estiver em `novo` 100% estável, porque a sombra do cancelamento depende do caminho de leitura já provado ([ADR-0009](0009-sombra-escrita-unica-e-idempotencia.md)).
-4. **Desligamento no monolito** é definido como: a fachada não envia tráfego da operação ao legado há pelo menos 4 semanas sem acionar rollback; só então o `case` da operação no `switch` do host e os métodos exclusivos (`ConsultaNfseServico.ConsultarNfse`, `ConsultarNfseServicoTomado`, `CancelamentoNfseServico`) são removidos em um release normal do legado. `NfseRepositorio`, `XmlNfseBuilder` e `ConsultaNfseServico` (parte de lote) permanecem, pois são usados por `ConsultarLoteRps`. O desligamento é o **único ponto sem volta** do processo: depois dele, nem o kill switch nem o *break-glass* ([ADR-0008](0008-fachada-yarp-roteamento-e-flags.md)) devolvem a operação ao legado. Por isso ele exige aprovação explícita e acontece em um release do legado separado e reversível por si só (o código removido volta por um novo release).
+4. **Desligamento no monolito** é definido como: a fachada não envia tráfego da operação ao legado durante um ciclo de competência completo, passando pelo dia 10 (pico de cancelamentos e vencimento da guia), e no mínimo 4 semanas, sem acionar rollback; só então o `case` da operação no `switch` do host e os métodos exclusivos (`ConsultaNfseServico.ConsultarNfse`, `ConsultarNfseServicoTomado`, `CancelamentoNfseServico`) são removidos em um release normal do legado. `NfseRepositorio`, `XmlNfseBuilder` e `ConsultaNfseServico` (parte de lote) permanecem, pois são usados por `ConsultarLoteRps`. O desligamento é o **único ponto sem volta** do processo: depois dele, nem o kill switch nem o *break-glass* ([ADR-0008](0008-fachada-yarp-roteamento-e-flags.md)) devolvem a operação ao legado. Por isso ele exige aprovação explícita e acontece em um release do legado separado e reversível por si só (o código removido volta por um novo release).
+
+### Números desta ADR
+
+| Valor | Origem | Onde calibrar |
+| --- | --- | --- |
+| Desligamento após um ciclo de competência completo (passando pelo dia 10) e no mínimo 4 semanas sem rollback | [H] | o dia 10 concentra cancelamentos e o vencimento da guia; revisar com o volume medido no M0 do plano |
+| `CancelarNfse` só entra em sombra com `ConsultarNfse` em `novo` 100% | [H] | pode ser antecipado se o caminho de leitura estiver estável em canário; decisão do plano |
 
 ## Alternativas consideradas
 

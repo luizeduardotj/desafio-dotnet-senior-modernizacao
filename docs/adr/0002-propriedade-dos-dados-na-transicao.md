@@ -16,6 +16,17 @@
   - **polling** é frágil: `NFSE` não tem coluna de última atualização, a substituição (`'S'`) não tem timestamp e `ORA_ROWSCN` não é por linha (tabela sem `ROWDEPENDENCIES`);
   - qualquer uma delas introduz **defasagem** exatamente na sequência cancelar → consultar.
 
+### Premissas e nível de verificação
+
+| # | Premissa | Fonte | Nível | Como confirmar | Se for falsa |
+| --- | --- | --- | --- | --- | --- |
+| P1 | `READ` permite consultar mas não `SELECT ... FOR UPDATE`; `SELECT` permite | documentação Oracle 12c+ | lida | teste de grants no CI | dar `SELECT` também nas views ao dono; o runtime continua só com `READ` |
+| P2 | Repassar leitura de views a terceiros exige `WITH GRANT OPTION` na origem (`ORA-01720`) | documentação Oracle | lida | script de grants aplicado no container de teste | — |
+| P3 | Views e pacotes com definer rights ignoram privilégios recebidos por role | documentação Oracle | lida | teste com grant só por role falha | — |
+| P4 | Sem privilégio, `UPDATE` dá `ORA-00942` e chamada de pacote dá `PLS-00201` | documentação Oracle | lida | teste de grants | ajustar o código esperado no teste |
+| P5 | O ODP.NET faz autocommit fora de transação explícita (o lote grava `LOTES_RPS` sem `Commit` e funciona) | `LoteRepositorio.cs:10-27`; comportamento do provider | lida | `just lote` no ambiente local seguido de `ConsultarLoteRps` | o lote já estaria quebrado; não afeta o serviço novo, que sempre usa transação explícita |
+| P6 | Ler o mesmo Oracle não degrada o processamento de lote | — | hipótese | teste de carga com lote e consultas concorrentes (M0 do plano) | antecipar read model ou réplica de leitura |
+
 ## Decisão
 
 1. **O legado é o sistema de registro** de `NFSE`, `GUIAS`, `CONTRIBUINTES`, `RPS` e `LOTES_RPS` durante toda a extração das três operações.
@@ -50,6 +61,20 @@
 | `CONTRIBUINTES` | legado | novo só lê | legado |
 | `RPS`, `LOTES_RPS` | legado | não usadas pelo novo | legado |
 | `NFSE_MODERNO.*` (views, wrapper) | — | novo (só leitura e execução) | — |
+
+### Números desta ADR
+
+| Valor | Origem | Onde calibrar |
+| --- | --- | --- |
+| Read model só se o p99 do processamento de lote subir mais de 20% sobre a linha de base | [H] | linha de base no M0; teste de carga com consultas concorrentes ao lote |
+
+## Fora deste ADR
+
+| Pendência | Dono | Trava |
+| --- | --- | --- |
+| Aprovação do DBA para os usuários `NFSE_MODERNO*` e os grants | DBA do Nota Carioca | a sombra de qualquer operação |
+| Limite de conexões do `NFSE_MODERNO_APP` e `NFSE_MODERNO_RO` acordado com o DBA | DBA + time de modernização | o canário de `ConsultarNfse` |
+| Read model próprio (CDC/outbox) | time de modernização | nada; reaberto se a premissa P6 falhar |
 
 ## Alternativas consideradas
 

@@ -86,6 +86,14 @@ Os limites exatos estão no [plano de migração](../plano-de-migracao.md).
 - **Segredos:** strings de conexão, chaves HMAC/AES e credenciais só por variável de ambiente/Secret do Kubernetes. Nunca em `appsettings*.json` versionado (outro problema do PR-212).
 - **Erros:** nenhuma resposta (SOAP ou REST) inclui mensagem de exceção ou stack trace (C20).
 
+### Números desta ADR
+
+| Valor | Origem | Onde calibrar |
+| --- | --- | --- |
+| Rollback se p99 do novo > 1,2 × p99 do legado por 15 min | [H] | variação natural do p99 do legado medida no M0 |
+| Rollback se taxa de `fault` do novo > legado + 0,1 p.p. | [H] | taxa de fault do legado medida no M0 |
+| Bloqueia avanço se descartes da sombra > 1% | [H] | capacidade do canal no teste de carga |
+
 ## Alternativas consideradas
 
 - **Jaeger + Prometheus + Grafana separados.** Válida, mas com mais containers e configuração para o mesmo resultado; `otel-lgtm` reduz memória no compose, que já tem o Oracle com 2–3 GB.

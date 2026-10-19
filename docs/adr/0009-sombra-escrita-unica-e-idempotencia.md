@@ -56,6 +56,24 @@ O novo **nunca escreve** em modo sombra. Ele expõe um endpoint interno `POST /i
 5. Avalia `PoliticaDeCancelamento` com o estado anterior e `agora = T0b`, e monta a resposta SOAP que **teria** devolvido, usando o `DataHora` da própria resposta do legado (o novo não pode produzir outro instante sem escrever).
 6. Compara a decisão (código de retorno ou sucesso) e os campos ecoados.
 
+```mermaid
+sequenceDiagram
+    participant E as ERP
+    participant F as Fachada
+    participant L as Legado
+    participant N as Serviço novo (usuário RO)
+    participant O as Oracle
+    E->>F: CancelarNfse (T0)
+    F->>L: encaminha
+    L->>O: cancelar_nfse + COMMIT
+    L-->>F: resposta
+    F-->>E: resposta do legado (sem esperar a sombra)
+    F--)N: requisição + resposta do legado + T0 (canal limitado)
+    N->>O: lê nota, guia e SYSDATE (views, só leitura)
+    N->>N: reconstrói estado anterior e avalia PoliticaDeCancelamento
+    N--)F: igual / divergente + classe
+```
+
 Limitações aceitas, cada uma com classe própria:
 
 - avaliar sobre o estado atual seria inútil: depois do cancelamento a nota está `C` e qualquer avaliação devolveria "já cancelada = sucesso", escondendo bugs de prazo e guia paga;
@@ -93,6 +111,24 @@ O registro (log estruturado + métrica, nunca no Oracle) contém:
 - **SOAP:** reenvio seguro, como hoje.
 - **REST:** `POST .../cancelamento` repetido devolve `200` com o mesmo recurso. Concorrência é serializada pelo lock do wrapper. **Não há tabela de idempotência.** O header `Idempotency-Key` é aceito e propagado para logs e traces (correlação de reenvios), mas não é obrigatório.
 - Se no futuro o cancelamento ganhar efeitos não idempotentes (ex.: notificação ao tomador), uma tabela de chaves gravada **na mesma transação** do cancelamento passa a ser necessária.
+
+### Números desta ADR
+
+| Valor | Origem | Onde calibrar |
+| --- | --- | --- |
+| Amostragem inicial de 5% | [H] | carga extra no Oracle medida no teste de carga; sobe por degraus no plano |
+| Reexecução de leitura divergente limitada a 1 por segundo | [H] | custo do full scan de `ServicoTomado` medido no teste de carga |
+| Janela de 2 s na reconstrução do cancelamento | [H] | skew fachada × banco medido; precisão de `DATE` |
+| Retenção de 15 dias do payload cifrado (fase 2) | [H] | tempo de triagem de uma divergência; validar com o encarregado de dados |
+
+## Fora deste ADR
+
+| Pendência | Dono | Trava |
+| --- | --- | --- |
+| Aprovação da pseudonimização e da retenção pelo encarregado de dados (DPO) | DPO | a sombra em produção (qualquer operação) |
+| Critérios estatísticos de saída da sombra (N, limite inferior de Wilson, códigos raros) | time de modernização | o avanço de `sombra` para `novo`; definidos no [plano de migração](../plano-de-migracao.md) |
+| Payload cifrado para reprodução exata | time de modernização | nada; fase 2 |
+| Sombra invertida em modo `novo` | time de modernização | nada; fase 2 |
 
 ## Alternativas consideradas
 
