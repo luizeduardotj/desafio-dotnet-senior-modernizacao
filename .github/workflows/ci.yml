@@ -62,3 +62,30 @@ jobs:
       - name: Derruba
         if: always()
         run: docker compose down -v
+
+  manifests:
+    # Valida os overlays de deploy/k8s contra os schemas do Kubernetes e dos CRDs (Argo Rollouts, External Secrets, OpenFeature).
+    # Não precisa de cluster. Binários com versão e SHA-256 fixos; o schema dos CRDs vem do datreeio/CRDs-catalog.
+    runs-on: ubuntu-latest
+    env:
+      KUBECTL_VERSION: v1.36.1
+      KUBECTL_SHA256: 629d3f410e09bf49b64ae7079f7f0bda1191efed311f7d37fdbab0ad5b0ec2b7
+      KUBECONFORM_VERSION: v0.8.0
+      KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+      CRD_CATALOG: https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instala kubectl (kustomize embutido) e kubeconform
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSLo "$RUNNER_TEMP/bin/kubectl" "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  $RUNNER_TEMP/bin/kubectl" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/bin/kubectl"
+          curl -fsSLo "$RUNNER_TEMP/kubeconform.tar.gz" "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  $RUNNER_TEMP/kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/kubeconform.tar.gz" -C "$RUNNER_TEMP/bin" kubeconform
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: kubeconform (overlay local)
+        run: kubectl kustomize deploy/k8s/overlays/local | kubeconform -strict -summary -schema-location default -schema-location "$CRD_CATALOG" -
+      - name: kubeconform (overlay producao)
+        run: kubectl kustomize deploy/k8s/overlays/producao | kubeconform -strict -summary -schema-location default -schema-location "$CRD_CATALOG" -

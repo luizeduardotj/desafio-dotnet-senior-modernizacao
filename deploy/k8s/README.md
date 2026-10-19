@@ -166,11 +166,19 @@ O SOAP responde em `http://127.0.0.1:18080/NfseWS.asmx`. Para ver o YAML gerado 
 
 As duas falhas vêm do controlador de NetworkPolicy do k3s (kube-router): ele libera o IP do pod novo depois que o pod já está pronto e recebendo tráfego, e o pacote é rejeitado. Repetiu nas duas rodadas com política e não apareceu sem ela. Não mudei os manifests por isso, porque o comportamento é do CNI: em produção, repetir o teste com o CNI do cluster (Cilium ou Calico) antes de confiar em zero erro no rollout. Se repetir lá, a correção é um `initialDelaySeconds` no readiness da fachada maior que o tempo de programação da política.
 
-`kubectl kustomize` dos dois overlays roda sem erro. `kubeconform` ainda não foi rodado:
+`kubectl kustomize` dos dois overlays roda sem erro e passa no `kubeconform` v0.8.0 (`-strict`), medido localmente:
+
+| Overlay | Recursos | Válidos | Inválidos | Ignorados |
+| --- | --- | --- | --- | --- |
+| `local` | 22 | 22 | 0 | 0 |
+| `producao` | 34 | 34 | 0 | 0 |
 
 ```bash
-kubectl kustomize deploy/k8s/overlays/local | kubeconform -strict -summary -
-kubectl kustomize deploy/k8s/overlays/producao | kubeconform -strict -summary -ignore-missing-schemas -
+CAT='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+kubectl kustomize deploy/k8s/overlays/local | kubeconform -strict -summary -schema-location default -schema-location "$CAT" -
+kubectl kustomize deploy/k8s/overlays/producao | kubeconform -strict -summary -schema-location default -schema-location "$CAT" -
 ```
 
-Em produção, `-ignore-missing-schemas` cobre os CRDs (Rollout, AnalysisTemplate, ExternalSecret, FeatureFlag), que não estão no catálogo padrão do kubeconform. O overlay de produção (Argo Rollouts, flagd, External Secrets) não foi aplicado em cluster.
+Os CRDs de produção (Rollout e AnalysisTemplate do Argo Rollouts, ExternalSecret, FeatureFlag do OpenFeature operator) são validados de verdade pelo [datreeio/CRDs-catalog](https://github.com/datreeio/CRDs-catalog): todos existem lá, então **não se usa `-ignore-missing-schemas`** e o resumo mostra 0 ignorados. Se um CRD novo não tiver schema no catálogo, o job falha em vez de pular em silêncio. Para confirmar que a checagem pega erro, renomear `maxSurge` em um Rollout faz o kubeconform reprovar o recurso (`additional properties 'maxSurgeX' not allowed`).
+
+O job `manifests` do [CI](../../.github/workflows/ci.yml) repete isso a cada push e PR, com kubectl (kustomize embutido) e kubeconform em versão e SHA-256 fixos. Limite: valida o formato, não o comportamento; o overlay de produção (Argo Rollouts, flagd, External Secrets) não foi aplicado em cluster.
