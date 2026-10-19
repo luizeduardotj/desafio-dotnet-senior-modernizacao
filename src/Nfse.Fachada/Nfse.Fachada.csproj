@@ -1,3 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
+  <ItemGroup>
+    <PackageReference Include="Yarp.ReverseProxy" />
+    <PackageReference Include="System.IO.Hashing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Nfse.Fachada.Testes" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="flags.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

@@ -1,7 +1,21 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <PropertyGroup>
+    <!-- xUnit1030 proíbe ConfigureAwait(false) em testes; CA2007 o exige. Nos testes vale o xUnit. -->
+    <NoWarn>$(NoWarn);CA2007</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="../../src/Nfse.Fachada/Nfse.Fachada.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Pedidos e respostas reais do legado: evidência de comportamento, usados como estão. -->
+    <None Include="../../tools/exemplos/*.xml" LinkBase="exemplos" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

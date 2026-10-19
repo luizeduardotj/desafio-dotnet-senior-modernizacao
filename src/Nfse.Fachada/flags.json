@@ -1,0 +1,10 @@
+{
+  "Migracao": {
+    "KillSwitch": false,
+    "Operacoes": {
+      "ConsultarNfse": { "Modo": "legado", "Percentual": 0, "KillSwitch": false, "Inclusao": [], "Exclusao": [], "Sombra": { "Amostragem": 0 } },
+      "ConsultarNfseServicoTomado": { "Modo": "legado", "Percentual": 0, "KillSwitch": false, "Inclusao": [], "Exclusao": [], "Sombra": { "Amostragem": 0 } },
+      "CancelarNfse": { "Modo": "legado", "Percentual": 0, "KillSwitch": false, "Inclusao": [], "Exclusao": [], "Sombra": { "Amostragem": 0 } }
+    }
+  }
+}

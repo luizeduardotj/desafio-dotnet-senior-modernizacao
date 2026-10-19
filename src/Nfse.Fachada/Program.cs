@@ -1,8 +1,71 @@
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Routing.Matching;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
+using Nfse.Fachada.Admin;
+using Nfse.Fachada.Configuracao;
+using Nfse.Fachada.Encaminhamento;
+using Nfse.Fachada.Flags;
+
 var builder = WebApplication.CreateBuilder(args);
+
+// Flags de migração: arquivo observado, recarregado sem restart. Arquivo ausente ou inválido não derruba o processo:
+// a seção some, a fonte devolve null e tudo vai ao legado (fail-safe).
+string arquivoDeFlags = builder.Configuration[$"{OpcoesFachada.Secao}:ArquivoDeFlags"] ?? new OpcoesFachada().ArquivoDeFlags;
+builder.Configuration.AddJsonFile(fonte =>
+{
+    fonte.Path = arquivoDeFlags;
+    fonte.Optional = true;
+    fonte.ReloadOnChange = true;
+    fonte.OnLoadException = contexto => contexto.Ignore = true;
+    fonte.ResolveFileProvider();
+});
+
+builder.WebHost.ConfigureKestrel((contexto, kestrel) =>
+{
+    // O legado não limita o corpo (Program.cs:20); a fachada não introduz limite.
+    kestrel.Limits.MaxRequestBodySize = null;
+    var fachada = contexto.Configuration.GetSection(OpcoesFachada.Secao).Get<OpcoesFachada>() ?? new();
+    var admin = contexto.Configuration.GetSection(OpcoesAdmin.Secao).Get<OpcoesAdmin>() ?? new();
+    kestrel.ListenAnyIP(fachada.Porta);
+    kestrel.ListenAnyIP(admin.Porta);
+});
+
+builder.Services.AddOptions<OpcoesFachada>().BindConfiguration(OpcoesFachada.Secao).ValidateDataAnnotations().ValidateOnStart();
+builder.Services.AddOptions<OpcoesLegado>().BindConfiguration(OpcoesLegado.Secao).ValidateDataAnnotations().ValidateOnStart();
+builder.Services.AddOptions<OpcoesNovo>().BindConfiguration(OpcoesNovo.Secao);
+builder.Services.AddOptions<OpcoesAdmin>().BindConfiguration(OpcoesAdmin.Secao).ValidateDataAnnotations().ValidateOnStart();
+builder.Services.Configure<FlagsDeMigracao>(builder.Configuration.GetSection(FlagsDeMigracao.Secao));
+
+builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<MatcherPolicy, PortaDoEndpointMatcherPolicy>());
+builder.Services.AddHttpForwarder();
+builder.Services.AddSingleton(_ => ClientesDeEncaminhamento.Criar());
+builder.Services.AddSingleton<IFonteDeFlags, FonteDeFlagsPorConfiguracao>();
+builder.Services.AddSingleton<KillSwitchAdministrativo>();
+builder.Services.AddSingleton<EncaminhadorSoap>();
+builder.Services.AddHealthChecks().AddCheck<FlagsCarregadasHealthCheck>("flags", tags: ["ready"]);
 
 var app = builder.Build();
 
-app.MapGet("/health/live", () => Results.Ok());
+if (app.Services.GetRequiredService<IOptions<OpcoesFachada>>().Value.Porta == app.Services.GetRequiredService<IOptions<OpcoesAdmin>>().Value.Porta)
+{
+    throw new InvalidOperationException("Fachada:Porta e Admin:Porta precisam ser diferentes.");
+}
+
+// Plano de dados só na porta pública; administração só na interna (PortaDoEndpointMatcherPolicy).
+app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false }).SomenteNaPorta(Plano.Dados);
+app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") }).SomenteNaPorta(Plano.Dados);
+app.MapEndpointsAdministrativos();
+
+app.MapPost("/NfseWS.asmx", (HttpContext ctx, EncaminhadorSoap encaminhador) => encaminhador.ProcessarSoapAsync(ctx))
+    .SomenteNaPorta(Plano.Dados);
+
+// /admin nunca vai ao legado, nem pela porta pública.
+app.Map("/admin/{**resto}", () => Results.NotFound()).SomenteNaPorta(Plano.Dados);
+
+// Todo o resto (GET ?wsdl, /health do legado, outros caminhos) atravessa sem alteração.
+app.Map("/{**caminho}", (HttpContext ctx, EncaminhadorSoap encaminhador) => encaminhador.EncaminharAoLegadoAsync(ctx))
+    .SomenteNaPorta(Plano.Dados);
 
 await app.RunAsync().ConfigureAwait(false);
 
