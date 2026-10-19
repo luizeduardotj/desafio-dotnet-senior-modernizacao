@@ -16,6 +16,13 @@ public sealed record FiltroDeNotasEmitidas(
     DateTime? CompetenciaAte = null,
     SituacaoNota? Situacao = null);
 
+/// <summary>
+/// Filtro da listagem de notas recebidas por um tomador, de qualquer prestador. Datas como em
+/// <see cref="FiltroDeNotasEmitidas"/>.
+/// </summary>
+/// <param name="TomadorDigitos">Documento do tomador, só dígitos, comparado como texto.</param>
+public sealed record FiltroDeNotasTomadas(string TomadorDigitos, DateTime InicioInclusivo, DateTime FimExclusivo, SituacaoNota? Situacao = null);
+
 /// <summary>Posição de uma nota na ordenação <c>DT_EMISSAO, ID</c> (paginação por keyset).</summary>
 public readonly record struct PosicaoNaListagem(DateTime DataEmissao, long Id);
 

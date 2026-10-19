@@ -17,10 +17,11 @@ builder.Services.AddSingleton(new FabricaDeConexoes(connectionString));
 builder.Services.AddSingleton<IContribuintes, Contribuintes>();
 builder.Services.AddSingleton<ILeituraDeNotas, LeituraDeNotas>();
 builder.Services.AddSingleton<ConsultaDeNotasEmitidas>();
+builder.Services.AddSingleton<ConsultaDeNotasTomadas>();
 
 builder.Services.AdicionarAdaptadorSoap();
 
-// REST: JWT (OIDC) configurado em Authentication:Schemes:Bearer; claim "inscricoes" autoriza por prestador (ADR-0010).
+// REST: JWT (OIDC) configurado em Authentication:Schemes:Bearer; claim "inscricoes" autoriza por prestador e "documento" identifica o tomador (ADR-0010).
 builder.Services.AddAuthentication().AddJwtBearer();
 builder.Services.AddAuthorization();
 builder.Services.AddProblemDetails();

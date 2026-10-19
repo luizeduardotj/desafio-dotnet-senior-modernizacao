@@ -19,34 +19,54 @@ public sealed class LeituraDeNotas(FabricaDeConexoes conexoes) : ILeituraDeNotas
         "n.TOMADOR_DOCUMENTO, n.TOMADOR_RAZAO, n.SITUACAO, n.DT_CANCELAMENTO, n.NUMERO_SUBSTITUIDORA, " +
         "n.PRESTADOR_DOCUMENTO, n.PRESTADOR_IM, n.PRESTADOR_RAZAO";
 
-    public async Task<IReadOnlyList<NotaFiscalLida>> ListarEmitidasPorFaixaAsync(
+    public Task<IReadOnlyList<NotaFiscalLida>> ListarEmitidasPorFaixaAsync(
         FiltroDeNotasEmitidas filtro, int deslocamento, int limite, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(filtro);
-        var parametros = Parametros(filtro);
-        parametros.Add("limite", limite);
-        parametros.Add("deslocamento", deslocamento);
-
-        // Mesma paginação do legado (ROWNUM dentro de ROWNUM, ordenação na subconsulta interna).
-        string sql =
-            "SELECT * FROM (SELECT a.*, ROWNUM RN FROM (" +
-            "SELECT " + Colunas + " FROM NFSE_MODERNO.V_NFSE n WHERE " + Condicoes(filtro) +
-            " ORDER BY n.DT_EMISSAO, n.ID) a WHERE ROWNUM <= :limite) WHERE RN > :deslocamento";
-
-        return await ConsultarAsync(sql, parametros, cancellationToken).ConfigureAwait(false);
+        return PorFaixaAsync(Condicoes(filtro), Parametros(filtro), deslocamento, limite, cancellationToken);
     }
 
-    public async Task<IReadOnlyList<NotaFiscalLida>> ListarEmitidasAposAsync(
+    public Task<IReadOnlyList<NotaFiscalLida>> ListarEmitidasAposAsync(
         FiltroDeNotasEmitidas filtro, PosicaoNaListagem? apos, int limite, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(filtro);
-        var parametros = Parametros(filtro);
-        parametros.Add("limite", limite);
+        return AposAsync(Condicoes(filtro), Parametros(filtro), apos, limite, cancellationToken);
+    }
 
-        var condicoes = new StringBuilder(Condicoes(filtro));
+    public Task<IReadOnlyList<NotaFiscalLida>> ListarTomadasPorFaixaAsync(
+        FiltroDeNotasTomadas filtro, int deslocamento, int limite, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(filtro);
+        return PorFaixaAsync(Condicoes(filtro), Parametros(filtro), deslocamento, limite, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<NotaFiscalLida>> ListarTomadasAposAsync(
+        FiltroDeNotasTomadas filtro, PosicaoNaListagem? apos, int limite, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(filtro);
+        return AposAsync(Condicoes(filtro), Parametros(filtro), apos, limite, cancellationToken);
+    }
+
+    // Mesma paginação do legado (ROWNUM dentro de ROWNUM, ordenação na subconsulta interna).
+    private Task<IReadOnlyList<NotaFiscalLida>> PorFaixaAsync(
+        string condicoes, DynamicParameters parametros, int deslocamento, int limite, CancellationToken cancellationToken)
+    {
+        parametros.Add("limite", limite);
+        parametros.Add("deslocamento", deslocamento);
+        string sql =
+            "SELECT * FROM (SELECT a.*, ROWNUM RN FROM (" +
+            "SELECT " + Colunas + " FROM NFSE_MODERNO.V_NFSE n WHERE " + condicoes +
+            " ORDER BY n.DT_EMISSAO, n.ID) a WHERE ROWNUM <= :limite) WHERE RN > :deslocamento";
+        return ConsultarAsync(sql, parametros, cancellationToken);
+    }
+
+    private Task<IReadOnlyList<NotaFiscalLida>> AposAsync(
+        string condicoes, DynamicParameters parametros, PosicaoNaListagem? apos, int limite, CancellationToken cancellationToken)
+    {
+        parametros.Add("limite", limite);
         if (apos is { } posicao)
         {
-            condicoes.Append(" AND (n.DT_EMISSAO > :aposData OR (n.DT_EMISSAO = :aposData AND n.ID > :aposId))");
+            condicoes += " AND (n.DT_EMISSAO > :aposData OR (n.DT_EMISSAO = :aposData AND n.ID > :aposId))";
             parametros.Add("aposData", posicao.DataEmissao);
             parametros.Add("aposId", posicao.Id);
         }
@@ -54,8 +74,7 @@ public sealed class LeituraDeNotas(FabricaDeConexoes conexoes) : ILeituraDeNotas
         string sql =
             "SELECT " + Colunas + " FROM NFSE_MODERNO.V_NFSE n WHERE " + condicoes +
             " ORDER BY n.DT_EMISSAO, n.ID FETCH FIRST :limite ROWS ONLY";
-
-        return await ConsultarAsync(sql, parametros, cancellationToken).ConfigureAwait(false);
+        return ConsultarAsync(sql, parametros, cancellationToken);
     }
 
     private static string Condicoes(FiltroDeNotasEmitidas filtro)
@@ -77,6 +96,27 @@ public sealed class LeituraDeNotas(FabricaDeConexoes conexoes) : ILeituraDeNotas
         }
 
         return sql.ToString();
+    }
+
+    // O legado faz TRUNC(DT_EMISSAO) >= :ini AND TRUNC(DT_EMISSAO) < :fim com bind numérico e /*+ FULL(n) */.
+    // Com ini e fim à meia-noite, a faixa sobre DT_EMISSAO é equivalente e usa IX_NFSE_TOMADOR_DT.
+    private static string Condicoes(FiltroDeNotasTomadas filtro) =>
+        "n.TOMADOR_DOCUMENTO = :tomador AND n.DT_EMISSAO >= :inicio AND n.DT_EMISSAO < :fim" +
+        (filtro.Situacao is null ? "" : " AND n.SITUACAO = :situacao");
+
+    private static DynamicParameters Parametros(FiltroDeNotasTomadas filtro)
+    {
+        var parametros = new DynamicParameters();
+        // Texto contra VARCHAR2 (C15): sem a colisão CPF × CNPJ do bind numérico do legado.
+        parametros.Add("tomador", filtro.TomadorDigitos, System.Data.DbType.String);
+        parametros.Add("inicio", filtro.InicioInclusivo);
+        parametros.Add("fim", filtro.FimExclusivo);
+        if (filtro.Situacao is { } situacao)
+        {
+            parametros.Add("situacao", CodigoDaSituacao(situacao), System.Data.DbType.String);
+        }
+
+        return parametros;
     }
 
     private static DynamicParameters Parametros(FiltroDeNotasEmitidas filtro)

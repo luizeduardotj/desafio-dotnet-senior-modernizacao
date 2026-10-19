@@ -62,6 +62,15 @@ public sealed class ConsultaDeNotasEmitidas(IContribuintes contribuintes, ILeitu
         IReadOnlyList<NotaFiscalLida> notas = await leitura
             .ListarEmitidasAposAsync(filtro, apos, limite + 1, cancellationToken).ConfigureAwait(false);
 
+        return Paginas.Cortar(notas, limite);
+    }
+}
+
+internal static class Paginas
+{
+    /// <summary>Corta a busca de <c>limite + 1</c> na página e na posição da próxima, se houver.</summary>
+    public static PaginaDeNotas Cortar(IReadOnlyList<NotaFiscalLida> notas, int limite)
+    {
         if (notas.Count <= limite)
         {
             return new PaginaDeNotas(notas, null);

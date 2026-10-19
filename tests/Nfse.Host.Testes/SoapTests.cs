@@ -81,9 +81,30 @@ public class SoapTests : IClassFixture<FabricaDoHost>
     }
 
     [Fact]
+    public async Task ServicoTomado_compara_documento_como_texto_sem_prestador()
+    {
+        string entrada = "<ConsultarNfseServicoTomadoEnvio><Consulente><CpfCnpj><Cnpj>01.234.567/0001-95</Cnpj></CpfCnpj></Consulente>" +
+            "<PeriodoEmissao><DataInicial>2026-10-01</DataInicial><DataFinal>2026-10-31</DataFinal></PeriodoEmissao></ConsultarNfseServicoTomadoEnvio>";
+
+        (HttpStatusCode status, string corpo) = await EnviarAsync("ConsultarNfseServicoTomado", entrada);
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("01234567000195", _fabrica.Dados.UltimoFiltroTomadas!.TomadorDigitos);
+        Assert.Contains("ConsultarNfseServicoTomadoResposta", corpo, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ServicoTomado_sem_documento_e_E020()
+    {
+        (_, string corpo) = await EnviarAsync("ConsultarNfseServicoTomado", "<ConsultarNfseServicoTomadoEnvio/>");
+
+        Assert.Contains("&lt;Codigo&gt;E020&lt;/Codigo&gt;", corpo, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Operacao_ainda_nao_extraida_devolve_503_para_a_fachada_ir_ao_legado()
     {
-        (HttpStatusCode status, _) = await EnviarAsync("ConsultarNfseServicoTomado", "<x/>");
+        (HttpStatusCode status, _) = await EnviarAsync("CancelarNfse", "<x/>");
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
     }

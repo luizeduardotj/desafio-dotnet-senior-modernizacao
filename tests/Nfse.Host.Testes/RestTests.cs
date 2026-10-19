@@ -120,3 +120,54 @@ public class RestTests : IClassFixture<FabricaDoHost>
         Assert.Contains("/api/v1/prestadores/{inscricao}/nfse", await resposta.Content.ReadAsStringAsync(), StringComparison.Ordinal);
     }
 }
+
+public class RestTomadorTests : IClassFixture<FabricaDoHost>
+{
+    private readonly FabricaDoHost _fabrica;
+
+    public RestTomadorTests(FabricaDoHost fabrica)
+    {
+        _fabrica = fabrica;
+        _fabrica.Dados.Notas.Clear();
+        _fabrica.Dados.Notas.Add(DadosFalsos.Nota(1, 21, new DateTime(2026, 10, 4, 9, 53, 0)));
+        _fabrica.Dados.Notas.Add(DadosFalsos.Nota(2, 30, new DateTime(2026, 10, 5, 9, 0, 0), tomador: "52998224725"));
+    }
+
+    private HttpClient Cliente(string? documento)
+    {
+        HttpClient cliente = _fabrica.CreateClient();
+        cliente.DefaultRequestHeaders.Add(AutenticacaoDeTeste.Header, "nenhuma");
+        if (documento is not null)
+        {
+            cliente.DefaultRequestHeaders.Add(AutenticacaoDeTeste.HeaderDocumento, documento);
+        }
+
+        return cliente;
+    }
+
+    [Fact]
+    public async Task So_ve_as_notas_do_titular_do_token()
+    {
+        JsonElement pagina = await Cliente("01234567000195").GetFromJsonAsync<JsonElement>("/api/v1/tomador/nfse?dataInicial=2026-10-01&dataFinal=2026-10-31");
+
+        Assert.Equal([21L], pagina.GetProperty("itens").EnumerateArray().Select(n => n.GetProperty("numero").GetInt64()));
+        Assert.Equal("01234567000195", _fabrica.Dados.UltimoFiltroTomadas!.TomadorDigitos);
+    }
+
+    [Fact]
+    public async Task Token_sem_documento_valido_e_403()
+    {
+        HttpResponseMessage resposta = await Cliente(null).GetAsync("/api/v1/tomador/nfse?dataInicial=2026-10-01&dataFinal=2026-10-31");
+
+        Assert.Equal(HttpStatusCode.Forbidden, resposta.StatusCode);
+    }
+
+    [Fact]
+    public async Task Documento_nao_e_aceito_na_url()
+    {
+        // não existe rota com o documento no caminho
+        HttpResponseMessage resposta = await Cliente("01234567000195").GetAsync("/api/v1/tomadores/01234567000195/nfse?dataInicial=2026-10-01&dataFinal=2026-10-31");
+
+        Assert.Equal(HttpStatusCode.NotFound, resposta.StatusCode);
+    }
+}

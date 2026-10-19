@@ -21,6 +21,7 @@ public static partial class EndpointSoap
     public static IServiceCollection AdicionarAdaptadorSoap(this IServiceCollection services)
     {
         services.AddSingleton<ConsultarNfseSoap>();
+        services.AddSingleton<ConsultarNfseServicoTomadoSoap>();
         return services;
     }
 
@@ -30,7 +31,8 @@ public static partial class EndpointSoap
         return app;
     }
 
-    private static async Task ProcessarAsync(HttpContext ctx, ConsultarNfseSoap consultarNfse, ILoggerFactory logs)
+    private static async Task ProcessarAsync(
+        HttpContext ctx, ConsultarNfseSoap consultarNfse, ConsultarNfseServicoTomadoSoap consultarServicoTomado, ILoggerFactory logs)
     {
         string acao = ctx.Request.Headers["SOAPAction"].ToString().Trim().Trim('"');
         string operacao = acao[(acao.LastIndexOf('/') + 1)..];
@@ -51,8 +53,10 @@ public static partial class EndpointSoap
                     saida = await consultarNfse.ExecutarAsync(entrada, ctx.RequestAborted).ConfigureAwait(false);
                     break;
                 case "ConsultarNfseServicoTomado":
+                    saida = await consultarServicoTomado.ExecutarAsync(entrada, ctx.RequestAborted).ConfigureAwait(false);
+                    break;
                 case "CancelarNfse":
-                    // Ainda não extraídas: 503 faz a fachada atender a leitura pelo legado (ADR-0008).
+                    // Ainda não extraída: 503 faz a fachada atender a leitura pelo legado (ADR-0008).
                     ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
                     return;
                 default:

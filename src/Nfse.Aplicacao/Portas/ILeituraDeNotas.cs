@@ -15,4 +15,12 @@ public interface ILeituraDeNotas
     /// <summary>Até <paramref name="limite"/> notas depois de <paramref name="apos"/> (keyset; ADR-0010).</summary>
     Task<IReadOnlyList<NotaFiscalLida>> ListarEmitidasAposAsync(
         FiltroDeNotasEmitidas filtro, PosicaoNaListagem? apos, int limite, CancellationToken cancellationToken);
+
+    /// <summary>Notas recebidas pelo tomador, por faixa de posição (contrato SOAP).</summary>
+    Task<IReadOnlyList<NotaFiscalLida>> ListarTomadasPorFaixaAsync(
+        FiltroDeNotasTomadas filtro, int deslocamento, int limite, CancellationToken cancellationToken);
+
+    /// <summary>Notas recebidas pelo tomador depois de <paramref name="apos"/> (keyset).</summary>
+    Task<IReadOnlyList<NotaFiscalLida>> ListarTomadasAposAsync(
+        FiltroDeNotasTomadas filtro, PosicaoNaListagem? apos, int limite, CancellationToken cancellationToken);
 }

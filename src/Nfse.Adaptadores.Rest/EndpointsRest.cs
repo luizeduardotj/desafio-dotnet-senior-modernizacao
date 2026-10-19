@@ -14,6 +14,7 @@ namespace Nfse.Adaptadores.Rest;
 public static class EndpointsRest
 {
     public const string ClaimInscricoes = "inscricoes";
+    public const string ClaimDocumento = "documento";
 
     public static IEndpointRouteBuilder MapNfseRest(this IEndpointRouteBuilder app)
     {
@@ -27,7 +28,79 @@ public static class EndpointsRest
           .ProducesProblem(StatusCodes.Status403Forbidden)
           .ProducesProblem(StatusCodes.Status404NotFound);
 
+        // O documento do tomador vem do token, nunca da URL: CPF não vai para access log nem para url.path (ADR-0012).
+        v1.MapGet("/tomador/nfse", ListarTomadasAsync)
+          .WithName("ListarNotasTomadas")
+          .WithSummary("Notas recebidas pelo titular do token, de todos os prestadores, no período (inclusivo, até 31 dias).")
+          .Produces<PaginaDto>()
+          .ProducesValidationProblem()
+          .ProducesProblem(StatusCodes.Status403Forbidden);
+
         return app;
+    }
+
+    private static async Task<IResult> ListarTomadasAsync(
+        string? dataInicial,
+        string? dataFinal,
+        string? situacao,
+        int? limite,
+        string? cursor,
+        ClaimsPrincipal usuario,
+        ConsultaDeNotasTomadas consulta,
+        CancellationToken cancellationToken)
+    {
+        Resultado<Documento> titular = Documento.Criar(usuario.FindFirst(ClaimDocumento)?.Value);
+        if (!titular.Sucesso)
+        {
+            return Problemas.SemPermissao();
+        }
+
+        var erros = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        PeriodoDeEmissao? periodo = LerPeriodo(dataInicial, dataFinal, erros);
+        SituacaoNota? filtroSituacao = LerSituacao(situacao, erros);
+
+        // O resumo do cursor usa um hash do documento, nunca o documento em claro.
+        string filtros = string.Join('|', "tomador", Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(titular.Valor.Digitos))), dataInicial, dataFinal, situacao);
+        if (!Cursor.TentarDecodificar(cursor, filtros, out PosicaoNaListagem? apos))
+        {
+            erros[nameof(cursor)] = ["Cursor inválido ou de outra consulta."];
+        }
+
+        if (erros.Count > 0 || periodo is null)
+        {
+            return Problemas.ParametrosInvalidos(erros);
+        }
+
+        Resultado<PaginaDeNotas> pagina = await consulta.ListarAsync(
+            titular.Valor, periodo, filtroSituacao, apos, limite ?? ConsultaDeNotasEmitidas.LimitePadrao, cancellationToken).ConfigureAwait(false);
+
+        return pagina.Erro switch
+        {
+            null => Results.Ok(new PaginaDto(
+                [.. pagina.Valor.Itens.Select(Converter)],
+                pagina.Valor.Proxima is { } proxima ? Cursor.Codificar(proxima, filtros) : null)),
+            var erro => Problemas.ParametrosInvalidos(new Dictionary<string, string[]> { [nameof(limite)] = [erro.Descricao] }),
+        };
+    }
+
+    private static PeriodoDeEmissao? LerPeriodo(string? dataInicial, string? dataFinal, Dictionary<string, string[]> erros)
+    {
+        DateOnly? inicio = LerData(dataInicial, nameof(dataInicial), erros);
+        DateOnly? fim = LerData(dataFinal, nameof(dataFinal), erros);
+        if (inicio is not { } i || fim is not { } f)
+        {
+            return null;
+        }
+
+        Resultado<PeriodoDeEmissao> resultado = PeriodoDeEmissao.Criar(i, f);
+        if (resultado.Sucesso)
+        {
+            return resultado.Valor;
+        }
+
+        erros["periodo"] = [resultado.Erro!.Descricao];
+        return null;
     }
 
     private static async Task<IResult> ListarEmitidasAsync(
@@ -47,23 +120,8 @@ public static class EndpointsRest
         }
 
         var erros = new Dictionary<string, string[]>(StringComparer.Ordinal);
-        DateOnly? inicio = LerData(dataInicial, nameof(dataInicial), erros);
-        DateOnly? fim = LerData(dataFinal, nameof(dataFinal), erros);
+        PeriodoDeEmissao? periodo = LerPeriodo(dataInicial, dataFinal, erros);
         SituacaoNota? filtroSituacao = LerSituacao(situacao, erros);
-
-        PeriodoDeEmissao? periodo = null;
-        if (inicio is { } i && fim is { } f)
-        {
-            Resultado<PeriodoDeEmissao> resultado = PeriodoDeEmissao.Criar(i, f);
-            if (resultado.Sucesso)
-            {
-                periodo = resultado.Valor;
-            }
-            else
-            {
-                erros["periodo"] = [resultado.Erro!.Descricao];
-            }
-        }
 
         string filtros = string.Join('|', inscricao, dataInicial, dataFinal, situacao);
         if (!Cursor.TentarDecodificar(cursor, filtros, out PosicaoNaListagem? apos))

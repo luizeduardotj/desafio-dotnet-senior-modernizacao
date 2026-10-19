@@ -40,6 +40,7 @@ public sealed class AutenticacaoDeTeste(IOptionsMonitor<AuthenticationSchemeOpti
 {
     public const string Esquema = "Teste";
     public const string Header = "X-Teste-Inscricoes";
+    public const string HeaderDocumento = "X-Teste-Documento";
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
@@ -48,7 +49,13 @@ public sealed class AutenticacaoDeTeste(IOptionsMonitor<AuthenticationSchemeOpti
             return Task.FromResult(AuthenticateResult.NoResult());
         }
 
-        var identidade = new ClaimsIdentity([new Claim("inscricoes", inscricoes.ToString())], Esquema);
+        var claims = new List<Claim> { new("inscricoes", inscricoes.ToString()) };
+        if (Request.Headers.TryGetValue(HeaderDocumento, out var documento))
+        {
+            claims.Add(new Claim("documento", documento.ToString()));
+        }
+
+        var identidade = new ClaimsIdentity(claims, Esquema);
         return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identidade), Esquema)));
     }
 }
@@ -87,6 +94,33 @@ public sealed class DadosFalsos : IContribuintes, ILeituraDeNotas
         IReadOnlyList<NotaFiscalLida> resultado = [.. notas.Take(limite)];
         return Task.FromResult(resultado);
     }
+
+    public Task<IReadOnlyList<NotaFiscalLida>> ListarTomadasPorFaixaAsync(FiltroDeNotasTomadas filtro, int deslocamento, int limite, CancellationToken cancellationToken)
+    {
+        UltimoFiltroTomadas = filtro;
+        IReadOnlyList<NotaFiscalLida> resultado = [.. Filtrar(filtro).Skip(Math.Max(0, deslocamento)).Take(Math.Max(0, limite - Math.Max(0, deslocamento)))];
+        return Task.FromResult(resultado);
+    }
+
+    public Task<IReadOnlyList<NotaFiscalLida>> ListarTomadasAposAsync(FiltroDeNotasTomadas filtro, PosicaoNaListagem? apos, int limite, CancellationToken cancellationToken)
+    {
+        UltimoFiltroTomadas = filtro;
+        IEnumerable<NotaFiscalLida> notas = Filtrar(filtro);
+        if (apos is { } p)
+        {
+            notas = notas.Where(n => n.DataEmissao > p.DataEmissao || (n.DataEmissao == p.DataEmissao && n.Id > p.Id));
+        }
+
+        IReadOnlyList<NotaFiscalLida> resultado = [.. notas.Take(limite)];
+        return Task.FromResult(resultado);
+    }
+
+    public FiltroDeNotasTomadas? UltimoFiltroTomadas { get; private set; }
+
+    private IEnumerable<NotaFiscalLida> Filtrar(FiltroDeNotasTomadas f) => Notas
+        .Where(n => n.TomadorDocumento?.Digitos == f.TomadorDigitos && n.DataEmissao >= f.InicioInclusivo && n.DataEmissao < f.FimExclusivo)
+        .Where(n => f.Situacao is null || n.Situacao == f.Situacao)
+        .OrderBy(n => n.DataEmissao).ThenBy(n => n.Id);
 
     private IEnumerable<NotaFiscalLida> Filtrar(FiltroDeNotasEmitidas f) => Notas
         .Where(n => n.Prestador.Id == f.PrestadorId && n.DataEmissao >= f.InicioInclusivo && n.DataEmissao < f.FimExclusivo)
