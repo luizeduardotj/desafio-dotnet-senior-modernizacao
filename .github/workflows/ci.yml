@@ -57,6 +57,12 @@ jobs:
           NFSE_PARIDADE_ORACLE: "User Id=NFSE_MODERNO_APP;Password=moderno_app_dev_123;Data Source=127.0.0.1:1521/FREEPDB1"
           NFSE_PARIDADE_ORACLE_RO: "User Id=NFSE_MODERNO_RO;Password=moderno_ro_dev_123;Data Source=127.0.0.1:1521/FREEPDB1"
         run: dotnet test tests/Nfse.Paridade.Testes -c Release
+      - name: Paridade do cancelamento (FIXED_DATE)
+        # Cancela notas do seed: roda depois das leituras, que não veem o banco alterado; o job termina com down -v.
+        # O script congela o SYSDATE como SYS no PDB e devolve FIXED_DATE = NONE ao sair, passe ou falhe.
+        env:
+          NFSE_PARIDADE_ORACLE: "User Id=NFSE_MODERNO_APP;Password=moderno_app_dev_123;Data Source=127.0.0.1:1521/FREEPDB1"
+        run: tests/paridade/cancelamento-fixed-date.sh
       - name: Estado e logs
         if: failure()
         run: |
