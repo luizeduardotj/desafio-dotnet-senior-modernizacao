@@ -16,8 +16,29 @@ O serviço novo é comparado contra `legado.xml` byte a byte pelos testes de `te
 | --- | --- | --- |
 | `ParidadeLeiturasTests` | `0xx` e `1xx` (ConsultarNfse e ServicoTomado) | `NFSE_PARIDADE_ORACLE` com a connection string do `NFSE_MODERNO_APP`; não depende do relógio nem dos cancelamentos |
 | `ParidadeCancelamentoTests` | `2xx`, na ordem | linha de base restaurada, `db/moderno` aplicado, `FIXED_DATE` e `NFSE_PARIDADE_CANCELAMENTO=1`; muda o banco, roda uma vez |
+| `GarantiasDeGrantsTests` | — (grants do `NFSE_MODERNO`) | `NFSE_PARIDADE_ORACLE` e/ou `NFSE_PARIDADE_ORACLE_RO`; cada teste roda com o usuário que confere; não escreve |
+| `GarantiaK08Tests` | — (K08 pelo wrapper) | `NFSE_PARIDADE_ORACLE` e `NFSE_PARIDADE_K08=1`; cancela a nota 27/5, roda uma vez por banco na linha de base |
 
 Para rodar o cancelamento, com o compose de pé e o banco na linha de base: `tests/paridade/cancelamento-fixed-date.sh` (exige `NFSE_PARIDADE_ORACLE`). Ele confere que as notas 1 e 2 do prestador 25 ainda não foram canceladas, aplica `FIXED_DATE` como SYS no `FREEPDB1`, roda só o `ParidadeCancelamentoTests` e volta `FIXED_DATE = NONE` ao sair, passe ou falhe.
+
+`recapturar-leituras-legado.sh` faz o caminho inverso para as leituras: recaptura os casos `0xx` e `1xx` direto do legado do compose (um curl na rede da fachada, para `webservices:8080`) e falha se `git diff --exit-code tests/paridade/casos` mostrar diferença. Prova que o golden master ainda descreve o legado, e não só que o novo o reproduz. Não há campo volátil a mascarar: as leituras não dependem do relógio (datas fixas no seed, nenhuma data de processamento na resposta) e rodam sem `FIXED_DATE`. Os `2xx` ficam de fora porque escrevem; o legado deles é conferido pela captura com `FIXED_DATE` descrita abaixo.
+
+## Garantias do banco
+
+Premissas que o serviço novo assume do Oracle, antes conferidas à mão no [spike de 2026-10-19](../../docs/spikes/2026-10-19-premissas-oracle.md), agora em `GarantiasDoBancoTests.cs`. Ficam neste projeto, e não num projeto de integração novo, porque usam o mesmo banco, as mesmas variáveis e o mesmo step do CI que a paridade; um projeto à parte duplicaria a configuração sem isolar nada.
+
+| Garantia | Usuário | Esperado |
+| --- | --- | --- |
+| a sombra lê as views `V_NFSE`, `V_CONTRIBUINTE`, `V_GUIA` | `NFSE_MODERNO_RO` | consulta funciona |
+| a sombra não lê `NFSE_OWNER.NFSE` | `NFSE_MODERNO_RO` | `ORA-00942` (o 23ai pode dar `ORA-41900`) |
+| a sombra não executa o wrapper ([ADR-0009](../../docs/adr/0009-sombra-escrita-unica-e-idempotencia.md)) | `NFSE_MODERNO_RO` | `ORA-06550` com `PLS-00201` |
+| o runtime não lê nem altera `NFSE_OWNER.NFSE` e não chama `PKG_NFSE` direto ([ADR-0002](../../docs/adr/0002-propriedade-dos-dados-na-transicao.md)) | `NFSE_MODERNO_APP` | `ORA-00942`/`ORA-41900`; `PLS-00201` |
+| `READ` nas views não permite `FOR UPDATE` nem DML | `NFSE_MODERNO_APP` | `ORA-01031` no 19c, `ORA-41900` no 23ai |
+| K08 corrigido: dois cancelamentos paralelos da mesma nota pelo wrapper ([ADR-0003](../../docs/adr/0003-regras-de-cancelamento-em-plsql.md)) | `NFSE_MODERNO_APP` | a 2ª sessão espera o lock, vê `C` e sai sem `UPDATE`: `DT_CANCELAMENTO` e motivo da 1ª, guia recalculada uma vez |
+
+Os códigos variam entre o 23ai do compose e o 19c de produção; os testes aceitam os das duas versões para a mesma classe de erro. Os testes de negativa que poderiam escrever, se um grant mudasse, usam `WHERE 1 = 0` e `ROLLBACK`.
+
+O K08 escreve. Usa a nota **27/5**: nenhum caso do corpus a usa (o cancelamento mexe em 25/1 e 25/2; 27/2 só aparece no K11, que falha sem gravar), o tomador dela não aparece nas consultas por tomador e a competência é a do mês da carga, com o prazo aberto pelo relógio real, sem `FIXED_DATE`. A sessão A cancela e segura o lock por 3 s; a B chama durante esse tempo. Se B gravasse de novo, o `SYSDATE` dela ficaria ao menos 3 s à frente no `DT_CANCELAMENTO` e no `DT_ATUALIZACAO` da guia. O `VALOR_ISS` da guia fica igual ao de antes porque o trigger autônomo não vê a nota cancelada (K07, preservado na migração). Para repetir localmente, restaure a linha de base.
 
 Divergências esperadas, por decisão do catálogo: `023` (C28, DTD recusada) e `209` (K11 com C20: Fault sem a mensagem do Oracle).
 
@@ -25,10 +46,13 @@ Divergências esperadas, por decisão do catálogo: `023` (C28, DTD recusada) e 
 
 ## No CI
 
-O job `compose` sobe o banco do zero e roda a paridade em dois steps, nesta ordem:
+O job `compose` sobe o banco do zero e, depois do smoke, roda nesta ordem:
 
-1. **Paridade**: leituras e sombra do cancelamento, sem `FIXED_DATE`. Nenhuma delas escreve, e o cancelamento fica em skip porque `NFSE_PARIDADE_CANCELAMENTO` não está definida.
-2. **Paridade do cancelamento (FIXED_DATE)**: `cancelamento-fixed-date.sh`. É o último uso do banco no job, e o `down -v` do fim o descarta. Assim as leituras nunca veem as notas canceladas. Numa execução local do job inteiro, num banco recém-carregado, as leituras também passaram depois do cancelamento (35 de 35). Mesmo assim, o CI mantém a ordem para não depender disso.
+1. **Golden master ainda descreve o legado**: `recapturar-leituras-legado.sh`, antes de qualquer escrita.
+2. **Paridade e garantias do banco**: leituras, sombra do cancelamento e grants, sem `FIXED_DATE`. Nenhum deles escreve; o cancelamento e o K08 ficam em skip porque `NFSE_PARIDADE_CANCELAMENTO` e `NFSE_PARIDADE_K08` não estão definidas.
+3. **K08 corrigido pelo wrapper**: só o `GarantiaK08Tests`, com `NFSE_PARIDADE_K08=1`. Cancela a nota 27/5.
+4. **Paridade do cancelamento (FIXED_DATE)**: `cancelamento-fixed-date.sh`. Último step que escreve; o `down -v` do fim descarta o banco.
+5. **Leituras conferidas de novo**: só o `ParidadeLeiturasTests`, para provar que as escritas dos steps 3 e 4 não tocam o golden master das leituras.
 
 No CI o seed carrega com o relógio real, e o `FIXED_DATE` só entra depois. Isso não muda o resultado dos casos `2xx`. As notas dos prestadores 1 a 24 têm datas fixas (julho a outubro de 2026). Os prestadores 25 a 27 ficam na competência do mês da carga, que nunca é anterior a outubro de 2026, então o prazo continua aberto em 09/10/2026. O mês da competência também não aparece na resposta do `CancelarNfse`, e o `DataHora` é o `SYSDATE` congelado.
 
