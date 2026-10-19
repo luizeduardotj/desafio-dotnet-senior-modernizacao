@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Nfse.Adaptadores.Rest;
 using Nfse.Adaptadores.Soap;
+using Nfse.Aplicacao.Cancelamento;
 using Nfse.Aplicacao.Consultas;
 using Nfse.Aplicacao.Portas;
 using Nfse.Infra.Oracle;
@@ -18,6 +19,8 @@ builder.Services.AddSingleton<IContribuintes, Contribuintes>();
 builder.Services.AddSingleton<ILeituraDeNotas, LeituraDeNotas>();
 builder.Services.AddSingleton<ConsultaDeNotasEmitidas>();
 builder.Services.AddSingleton<ConsultaDeNotasTomadas>();
+builder.Services.AddSingleton<IGatewayDeCancelamento, GatewayDeCancelamento>();
+builder.Services.AddSingleton<CancelamentoDeNota>();
 
 builder.Services.AdicionarAdaptadorSoap();
 

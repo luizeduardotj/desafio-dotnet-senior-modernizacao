@@ -102,9 +102,9 @@ public class SoapTests : IClassFixture<FabricaDoHost>
     }
 
     [Fact]
-    public async Task Operacao_ainda_nao_extraida_devolve_503_para_a_fachada_ir_ao_legado()
+    public async Task Operacao_de_lote_nao_e_atendida_pelo_novo()
     {
-        (HttpStatusCode status, _) = await EnviarAsync("CancelarNfse", "<x/>");
+        (HttpStatusCode status, _) = await EnviarAsync("RecepcionarLoteRps", "<x/>");
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
     }

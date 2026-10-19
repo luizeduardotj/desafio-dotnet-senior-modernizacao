@@ -1,0 +1,104 @@
+using System.Globalization;
+using System.Net;
+using System.Text;
+
+namespace Nfse.Paridade.Testes;
+
+/// <summary>
+/// Golden master do <c>CancelarNfse</c> (ADR-0011). Muda o estado do banco: exige a linha de base restaurada,
+/// <c>FIXED_DATE = '2026-10-09-15:00:00'</c> e roda os casos na ordem dos nomes, uma única vez. Por isso só roda com
+/// <c>NFSE_PARIDADE_CANCELAMENTO=1</c> além da connection string.
+/// </summary>
+public sealed class ParidadeCancelamentoTests : IClassFixture<ParidadeLeiturasTests.Fabrica>
+{
+    // K11/C20: o legado devolve o Fault com a mensagem do Oracle (ORA-12899); o novo, um texto genérico com trace.
+    private const string CasoDoFault = "209-k11-motivo-255-acentuados";
+
+    private readonly ParidadeLeiturasTests.Fabrica _fabrica;
+
+    public ParidadeCancelamentoTests(ParidadeLeiturasTests.Fabrica fabrica) => _fabrica = fabrica;
+
+    [ParidadeCancelamentoFact]
+    public async Task Cancelamentos_iguais_ao_legado_na_ordem_do_corpus()
+    {
+        var divergencias = new List<string>();
+        string raiz = Corpus.Raiz();
+        foreach (string pasta in Directory.GetDirectories(Path.Combine(raiz, "tests", "paridade", "casos")).Order(StringComparer.Ordinal))
+        {
+            if (File.ReadAllText(Path.Combine(pasta, "operacao")).Trim() != "CancelarNfse")
+            {
+                continue;
+            }
+
+            string caso = Path.GetFileName(pasta);
+            (HttpStatusCode status, string corpo) = await Corpus.EnviarAsync(_fabrica.CreateClient(), "CancelarNfse", pasta);
+            string esperado = File.ReadAllText(Path.Combine(pasta, "legado.xml"));
+            var statusEsperado = (HttpStatusCode)int.Parse(File.ReadAllText(Path.Combine(pasta, "legado.status")).Trim(), CultureInfo.InvariantCulture);
+
+            if (caso == CasoDoFault)
+            {
+                bool ok = status == statusEsperado && corpo.Contains("<faultcode>soap:Server</faultcode>", StringComparison.Ordinal)
+                    && !corpo.Contains("ORA-", StringComparison.Ordinal) && esperado.Contains("ORA-12899", StringComparison.Ordinal);
+                if (!ok)
+                {
+                    divergencias.Add($"{caso}: esperado Fault soap:Server sem mensagem do Oracle; veio {status}: {corpo}");
+                }
+
+                continue;
+            }
+
+            if (status != statusEsperado || corpo != esperado)
+            {
+                divergencias.Add($"{caso}: {status}\n  legado: {esperado}\n  novo:   {corpo}");
+            }
+        }
+
+        Assert.True(divergencias.Count == 0, string.Join("\n", divergencias));
+    }
+}
+
+public sealed class ParidadeCancelamentoFactAttribute : FactAttribute
+{
+    public ParidadeCancelamentoFactAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(ParidadeTheoryAttribute.Variavel)) ||
+            Environment.GetEnvironmentVariable("NFSE_PARIDADE_CANCELAMENTO") != "1")
+        {
+            Skip = "muda o banco: defina NFSE_PARIDADE_CANCELAMENTO=1 sobre a linha de base com FIXED_DATE (tests/paridade/README.md)";
+        }
+    }
+}
+
+/// <summary>Envelope e envio iguais aos de <c>tests/paridade/capturar.sh</c>.</summary>
+internal static class Corpus
+{
+    public static async Task<(HttpStatusCode Status, string Corpo)> EnviarAsync(HttpClient cliente, string operacao, string pasta)
+    {
+        string entrada = File.ReadAllText(Path.Combine(pasta, "entrada.xml")).TrimEnd('\n');
+        string envelope =
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?><soap:Envelope xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\"><soap:Body>" +
+            $"<{operacao}Request xmlns=\"http://notacarioca.rio.gov.br/\"><inputXML>" +
+            entrada.Replace("&", "&amp;", StringComparison.Ordinal).Replace("<", "&lt;", StringComparison.Ordinal)
+                .Replace(">", "&gt;", StringComparison.Ordinal).Replace("\n", "", StringComparison.Ordinal) +
+            $"</inputXML></{operacao}Request></soap:Body></soap:Envelope>";
+
+        using var conteudo = new StringContent(envelope, Encoding.UTF8, "text/xml");
+        using var pedido = new HttpRequestMessage(HttpMethod.Post, "/NfseWS.asmx") { Content = conteudo };
+        pedido.Headers.Add("SOAPAction", $"\"http://notacarioca.rio.gov.br/{operacao}\"");
+        using HttpResponseMessage resposta = await cliente.SendAsync(pedido);
+        return (resposta.StatusCode, await resposta.Content.ReadAsStringAsync());
+    }
+
+    public static string Raiz()
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "Nfse.Moderno.slnx")))
+            {
+                return dir.FullName;
+            }
+        }
+
+        throw new InvalidOperationException("Raiz do repositório não encontrada.");
+    }
+}

@@ -34,3 +34,9 @@ public sealed record CancelamentoDto(DateTimeOffset DataHora);
 public sealed record SubstituicaoDto(long Numero);
 
 public sealed record PaginaDto(IReadOnlyList<NfseDto> Itens, string? ProximoCursor);
+
+/// <summary>Corpo do pedido de cancelamento.</summary>
+public sealed record PedidoDeCancelamentoDto(string? Motivo);
+
+/// <summary>Cancelamento efetuado, ou já existente (o pedido é idempotente, K01).</summary>
+public sealed record CancelamentoEfetuadoDto(long Numero, DateTimeOffset DataHora, bool JaEstavaCancelada);

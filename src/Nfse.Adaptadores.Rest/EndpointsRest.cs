@@ -3,7 +3,9 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Nfse.Aplicacao.Cancelamento;
 using Nfse.Aplicacao.Consultas;
+using Nfse.Dominio.Cancelamento;
 using Nfse.Dominio.Comum;
 using Nfse.Dominio.Documentos;
 using Nfse.Dominio.Notas;
@@ -27,6 +29,17 @@ public static class EndpointsRest
           .ProducesValidationProblem()
           .ProducesProblem(StatusCodes.Status403Forbidden)
           .ProducesProblem(StatusCodes.Status404NotFound);
+
+        v1.MapPost("/prestadores/{inscricao}/nfse/{numero:long}/cancelamento", CancelarAsync)
+          .WithName("CancelarNota")
+          .WithSummary("Cancela a NFS-e. Repetir o pedido é seguro: a nota já cancelada devolve o cancelamento existente.")
+          .Accepts<PedidoDeCancelamentoDto>("application/json")
+          .Produces<CancelamentoEfetuadoDto>()
+          .ProducesValidationProblem()
+          .ProducesProblem(StatusCodes.Status403Forbidden)
+          .ProducesProblem(StatusCodes.Status404NotFound)
+          .ProducesProblem(StatusCodes.Status409Conflict)
+          .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
 
         // O documento do tomador vem do token, nunca da URL: CPF não vai para access log nem para url.path (ADR-0012).
         v1.MapGet("/tomador/nfse", ListarTomadasAsync)
@@ -81,6 +94,53 @@ public static class EndpointsRest
                 [.. pagina.Valor.Itens.Select(Converter)],
                 pagina.Valor.Proxima is { } proxima ? Cursor.Codificar(proxima, filtros) : null)),
             var erro => Problemas.ParametrosInvalidos(new Dictionary<string, string[]> { [nameof(limite)] = [erro.Descricao] }),
+        };
+    }
+
+    /// <summary>Limite da coluna <c>MOTIVO_CANCELAMENTO VARCHAR2(255)</c>, em bytes (K11).</summary>
+    private const int MaximoDeBytesDoMotivo = 255;
+
+    private static async Task<IResult> CancelarAsync(
+        string inscricao,
+        long numero,
+        PedidoDeCancelamentoDto? pedido,
+        ClaimsPrincipal usuario,
+        CancelamentoDeNota cancelamento)
+    {
+        if (!Representa(usuario, inscricao))
+        {
+            return Problemas.SemPermissao();
+        }
+
+        string? motivo = pedido?.Motivo?.Trim();
+        if (string.IsNullOrEmpty(motivo) || System.Text.Encoding.UTF8.GetByteCount(motivo) > MaximoDeBytesDoMotivo)
+        {
+            return Problemas.ParametrosInvalidos(new Dictionary<string, string[]>
+            {
+                ["motivo"] = [$"Obrigatório, com até {MaximoDeBytesDoMotivo} bytes em UTF-8."],
+            });
+        }
+
+        // Sem o token da requisição: chegando ao banco, o cancelamento termina e comita; repetir é seguro (ADR-0009).
+        Resultado<RespostaDoCancelamento> resultado = await cancelamento
+            .CancelarAsync(inscricao, numero, motivo, CancellationToken.None).ConfigureAwait(false);
+
+        if (resultado.Erro is PrestadorNaoEncontrado)
+        {
+            return Problemas.PrestadorNaoEncontrado();
+        }
+
+        RespostaDoCancelamento resposta = resultado.Valor;
+        return resposta.Decisao switch
+        {
+            DecisaoDeCancelamento.NotaNaoEncontrada => Problemas.NfseNaoEncontrada(),
+            DecisaoDeCancelamento.NotaSubstituida => Problemas.NfseSubstituida(),
+            DecisaoDeCancelamento.PrazoExpirado => Problemas.PrazoExpirado(),
+            DecisaoDeCancelamento.GuiaPaga => Problemas.GuiaPaga(),
+            _ => Results.Ok(new CancelamentoEfetuadoDto(
+                numero,
+                HorarioDeSaoPaulo.ComOffset(resposta.DataCancelamento ?? throw new InvalidOperationException("Cancelamento sem data.")),
+                resposta.Decisao == DecisaoDeCancelamento.JaCancelada)),
         };
     }
 

@@ -31,7 +31,7 @@ Execução das premissas que as ADRs marcavam como "lida no código". Ambiente: 
 
 ## Pendências
 
-- Restaurar o volume `nfse-oracle-baseline` e conferir que a restauração devolve o estado do seed (fecha a 0011 P4).
+- ~~Restaurar o volume `nfse-oracle-baseline`~~: feito na paridade do cancelamento (0011 P4 confirmada).
 - 0003 P5 (rollback do chamador com guia criada pelo `COMMIT` autônomo) e P6 (idempotência do `recalcular_guia`): não exercitadas.
 - 0002 P6 (carga das consultas × lote): depende do teste de carga.
 - Premissas de produção (fuso, competência nula, grants aprovados pelo DBA): só com o DBA do 19c.

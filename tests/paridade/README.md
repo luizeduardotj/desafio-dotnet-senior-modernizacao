@@ -10,7 +10,16 @@ Cada pasta em `casos/` tem:
 | `descricao` | o que o caso prova, com o ID do catálogo ([ADR-0004](../../docs/adr/0004-comportamentos-legados-nao-documentados.md)) |
 | `legado.xml`, `legado.status` | resposta aprovada do legado (corpo HTTP e status) |
 
-O serviço novo é comparado contra `legado.xml` byte a byte (`capturar.sh novo <url>` grava `novo.xml` ao lado).
+O serviço novo é comparado contra `legado.xml` byte a byte pelos testes de `tests/Nfse.Paridade.Testes`:
+
+| Teste | Casos | Pré-condição |
+| --- | --- | --- |
+| `ParidadeLeiturasTests` | `0xx` e `1xx` (ConsultarNfse e ServicoTomado) | `NFSE_PARIDADE_ORACLE` com a connection string do `NFSE_MODERNO_APP`; não depende do relógio nem dos cancelamentos |
+| `ParidadeCancelamentoTests` | `2xx`, na ordem | linha de base restaurada, `db/moderno` aplicado, `FIXED_DATE` e `NFSE_PARIDADE_CANCELAMENTO=1`; muda o banco, roda uma vez |
+
+Divergências esperadas, por decisão do catálogo: `023` (C28, DTD recusada) e `209` (K11 com C20: Fault sem a mensagem do Oracle).
+
+`capturar.sh novo <url>` também grava `novo.xml` ao lado, para inspeção manual.
 
 ## Como capturar de forma reproduzível
 

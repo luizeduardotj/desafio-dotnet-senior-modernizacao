@@ -7,7 +7,9 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Nfse.Aplicacao.Cancelamento;
 using Nfse.Aplicacao.Consultas;
+using Nfse.Dominio.Cancelamento;
 using Nfse.Aplicacao.Portas;
 using Nfse.Dominio.Documentos;
 using Nfse.Dominio.Notas;
@@ -26,6 +28,7 @@ public sealed class FabricaDoHost : WebApplicationFactory<Program>
         {
             services.AddSingleton<IContribuintes>(Dados);
             services.AddSingleton<ILeituraDeNotas>(Dados);
+            services.AddSingleton<IGatewayDeCancelamento>(Dados);
             services.AddAuthentication(o =>
             {
                 o.DefaultAuthenticateScheme = AutenticacaoDeTeste.Esquema;
@@ -60,7 +63,7 @@ public sealed class AutenticacaoDeTeste(IOptionsMonitor<AuthenticationSchemeOpti
     }
 }
 
-public sealed class DadosFalsos : IContribuintes, ILeituraDeNotas
+public sealed class DadosFalsos : IContribuintes, ILeituraDeNotas, IGatewayDeCancelamento
 {
     public List<PrestadorLido> Prestadores { get; } =
     [
@@ -71,6 +74,21 @@ public sealed class DadosFalsos : IContribuintes, ILeituraDeNotas
     public List<NotaFiscalLida> Notas { get; } = [];
 
     public FiltroDeNotasEmitidas? UltimoFiltro { get; private set; }
+
+    /// <summary>Resposta do wrapper falso; o padrão é cancelar agora.</summary>
+    public ResultadoDoGateway RespostaDoCancelamento { get; set; } = new(
+        DecisaoDeCancelamento.Permitido,
+        new EstadoParaCancelamento(SituacaoNota.Normal, new Competencia(2026, 10), false),
+        new DateTime(2026, 10, 9, 15, 0, 0),
+        new DateTime(2026, 10, 9, 15, 0, 0));
+
+    public (long PrestadorId, long Numero, string Motivo)? UltimoCancelamento { get; private set; }
+
+    public Task<ResultadoDoGateway> CancelarAsync(long prestadorId, long numero, string motivo, CancellationToken cancellationToken)
+    {
+        UltimoCancelamento = (prestadorId, numero, motivo);
+        return Task.FromResult(RespostaDoCancelamento);
+    }
 
     public Task<PrestadorLido?> ObterPorInscricaoAsync(string inscricaoMunicipal, CancellationToken cancellationToken) =>
         Task.FromResult(Prestadores.FirstOrDefault(p => p.InscricaoMunicipal == inscricaoMunicipal));

@@ -22,6 +22,7 @@ public static partial class EndpointSoap
     {
         services.AddSingleton<ConsultarNfseSoap>();
         services.AddSingleton<ConsultarNfseServicoTomadoSoap>();
+        services.AddSingleton<CancelarNfseSoap>();
         return services;
     }
 
@@ -32,7 +33,11 @@ public static partial class EndpointSoap
     }
 
     private static async Task ProcessarAsync(
-        HttpContext ctx, ConsultarNfseSoap consultarNfse, ConsultarNfseServicoTomadoSoap consultarServicoTomado, ILoggerFactory logs)
+        HttpContext ctx,
+        ConsultarNfseSoap consultarNfse,
+        ConsultarNfseServicoTomadoSoap consultarServicoTomado,
+        CancelarNfseSoap cancelarNfse,
+        ILoggerFactory logs)
     {
         string acao = ctx.Request.Headers["SOAPAction"].ToString().Trim().Trim('"');
         string operacao = acao[(acao.LastIndexOf('/') + 1)..];
@@ -56,7 +61,14 @@ public static partial class EndpointSoap
                     saida = await consultarServicoTomado.ExecutarAsync(entrada, ctx.RequestAborted).ConfigureAwait(false);
                     break;
                 case "CancelarNfse":
-                    // Ainda não extraída: 503 faz a fachada atender a leitura pelo legado (ADR-0008).
+                    // Sem CancellationToken da requisição: depois de chegar ao banco, o cancelamento termina e comita
+                    // mesmo que o cliente desista, e o reenvio é idempotente (K01, ADR-0009).
+                    saida = await cancelarNfse.ExecutarAsync(entrada, CancellationToken.None).ConfigureAwait(false);
+                    break;
+                case "RecepcionarLoteRps":
+                case "ConsultarSituacaoLoteRps":
+                case "ConsultarLoteRps":
+                    // Ficam no legado (ADR-0001). Se chegarem aqui por engano, 503 faz a fachada usar o legado.
                     ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
                     return;
                 default:
