@@ -42,7 +42,7 @@ Dependências apontam para dentro: `Dominio` ← `Aplicacao` ← adaptadores ←
 
 ### CQRS onde faz sentido
 
-- **Lado de leitura:** query handlers chamam `ILeituraDeNotas`, que devolve **modelos de leitura** (projeções) direto das views, com SQL explícito e paginação por keyset. Não há agregado, nem repositório genérico, nem mapeamento de entidade para leitura. O adaptador SOAP usa uma porta própria (`ILeituraCompativelSoap`) com a paginação do legado, para que offset e filtros herdados não entrem na aplicação ([ADR-0006](0006-camada-anticorrupcao.md)).
+- **Lado de leitura:** query handlers chamam `ILeituraDeNotas`, que devolve **modelos de leitura** (projeções) direto das views, com SQL explícito e paginação por keyset. Não há agregado, nem repositório genérico, nem mapeamento de entidade para leitura. A mesma porta oferece paginação por faixa de posição, que o adaptador SOAP usa com a aritmética do legado; as peculiaridades ficam no adaptador ([ADR-0006](0006-camada-anticorrupcao.md), atualização de 2026-10-19).
 - **Lado de escrita:** `CancelarNota` carrega o snapshot necessário, avalia `PoliticaDeCancelamento` (dual-run) e chama `IGatewayDeCancelamento` (wrapper PL/SQL). Uma transação, um commit.
 - Leitura e escrita compartilham o mesmo banco ([ADR-0002](0002-propriedade-dos-dados-na-transicao.md)); a separação é de **modelo e de código**, não de armazenamento. Um read model próprio pode ser plugado atrás de `ILeituraDeNotas` sem mudar a aplicação.
 

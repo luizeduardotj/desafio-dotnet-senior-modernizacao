@@ -10,8 +10,11 @@
     <Project Path="src/Nfse.Observabilidade/Nfse.Observabilidade.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Nfse.Adaptadores.Soap.Testes/Nfse.Adaptadores.Soap.Testes.csproj" />
     <Project Path="tests/Nfse.Arquitetura.Testes/Nfse.Arquitetura.Testes.csproj" />
     <Project Path="tests/Nfse.Dominio.Testes/Nfse.Dominio.Testes.csproj" />
     <Project Path="tests/Nfse.Fachada.Testes/Nfse.Fachada.Testes.csproj" />
+    <Project Path="tests/Nfse.Host.Testes/Nfse.Host.Testes.csproj" />
+    <Project Path="tests/Nfse.Paridade.Testes/Nfse.Paridade.Testes.csproj" />
   </Folder>
 </Solution>

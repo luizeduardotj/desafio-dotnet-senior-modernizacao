@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Nfse.Adaptadores.Soap/Nfse.Adaptadores.Soap.csproj" />
+  </ItemGroup>
+
+</Project>

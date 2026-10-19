@@ -45,6 +45,13 @@ jobs:
         run: docker compose up -d --wait --wait-timeout 1800
       - name: Smoke test (health e ConsultarNfse igual ao legado)
         run: tools/smoke-compose.sh
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Paridade (golden master do ConsultarNfse contra o Oracle do compose)
+        env:
+          NFSE_PARIDADE_ORACLE: "User Id=NFSE_MODERNO_APP;Password=moderno_app_dev_123;Data Source=127.0.0.1:1521/FREEPDB1"
+        run: dotnet test tests/Nfse.Paridade.Testes -c Release
       - name: Estado e logs
         if: failure()
         run: |

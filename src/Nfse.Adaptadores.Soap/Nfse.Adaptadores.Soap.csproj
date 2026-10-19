@@ -1,7 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- Camada anticorrupção: fala o contrato SOAP do legado e traduz para a aplicação (ADR-0006). -->
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="../Nfse.Aplicacao/Nfse.Aplicacao.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Nfse.Adaptadores.Soap.Testes" />
   </ItemGroup>
 
 </Project>
