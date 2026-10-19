@@ -60,12 +60,12 @@ spec:
           env:
             # Dois usuários (ADR-0002, db/moderno): _APP escreve só pelo PKG_CANCELAMENTO_API;
             # _RO atende a sombra, que nunca escreve.
-            - name: ConnectionStrings__NfseModernoApp
+            - name: ConnectionStrings__Oracle
               valueFrom:
                 secretKeyRef:
                   name: nfse-novo-oracle
                   key: app
-            - name: ConnectionStrings__NfseModernoRo
+            - name: ConnectionStrings__OracleSomenteLeitura
               valueFrom:
                 secretKeyRef:
                   name: nfse-novo-oracle

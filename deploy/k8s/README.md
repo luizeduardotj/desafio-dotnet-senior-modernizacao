@@ -52,10 +52,10 @@ O Ingress SOAP tem `proxy-body-size: 0` (o legado não limita o corpo e a fachad
 Mesmo padrão de probes, segurança e rollout. Diferenças:
 
 - **HPA por CPU** (70% do request, 2 a 6 réplicas; 3 a 6 em produção) **[H]**. O teto vem do Oracle, não do custo: `maxReplicas × Max Pool Size` precisa caber no orçamento de sessões combinado com o DBA (6 × 20 = 120). O Deployment não declara `replicas`, para o `apply` não brigar com o HPA.
-- **Secret `nfse-novo-oracle`** com duas connection strings: `ConnectionStrings__NfseModernoApp` (escreve só pelo `PKG_CANCELAMENTO_API`) e `ConnectionStrings__NfseModernoRo` (sombra). Os nomes das variáveis são o contrato proposto para o `Nfse.Host`, que ainda não lê nenhuma das duas.
-- **Readiness** em `/health/ready`, que deve checar o Oracle; a **liveness não checa o banco** (Oracle lento reiniciando todos os pods só piora o incidente).
+- **Secret `nfse-novo-oracle`** com duas connection strings, com os nomes que o `Nfse.Host` lê: `ConnectionStrings__Oracle` (usuário `NFSE_MODERNO_APP`, que escreve só pelo `PKG_CANCELAMENTO_API`) e `ConnectionStrings__OracleSomenteLeitura` (usuário `NFSE_MODERNO_RO`, da sombra do cancelamento).
+- **Readiness** em `/health/ready` (o check do Oracle ainda é um TODO no Host); a **liveness não checa o banco** (Oracle lento reiniciando todos os pods só piora o incidente).
 - NetworkPolicy: 8080 só da fachada (SOAP) e do `ingress-nginx` (REST); 8081 (interna, sombra do cancelamento) só da fachada.
-- A porta `interno` 8081 está no Deployment e no Service; o `Nfse.Host` precisa escutar nela o endpoint interno (ainda não configurado em `ASPNETCORE_HTTP_PORTS`).
+- A porta `interno` 8081 está no Deployment e no Service. O `Nfse.Host` escuta nas duas portas (`Porta`, padrão 8080, e `Interno:Porta`, padrão 8081), e o endpoint `/interno/sombra/cancelamento` só responde na 8081.
 
 ## Flags e kill switch
 
