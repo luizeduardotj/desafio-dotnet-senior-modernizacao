@@ -111,7 +111,7 @@ sequenceDiagram
 | `Flags__Fonte` | `arquivo` | `arquivo` (seção `Migracao` do arquivo abaixo) ou `openfeature` (flagd); outro valor impede a partida |
 | `Fachada__ArquivoDeFlags` | `flags.json` | caminho relativo ao content root, ou absoluto; só com `Flags__Fonte=arquivo` |
 | `Flags__Flagd__Host` / `Flags__Flagd__Porta` | `FLAGD_HOST` / `FLAGD_PORT`, senão `localhost` / `8015` | sync do flagd (in-process); só com `openfeature` |
-| `Flags__Flagd__Seletor` | `FLAGD_SOURCE_SELECTOR` | fonte do flagd a sincronizar (em produção, `core.openfeature.dev/nfse/nfse-migracao`); vazio, todas |
+| `Flags__Flagd__Seletor` | `FLAGD_SOURCE_SELECTOR` | fonte do flagd a sincronizar (em produção, `nfse/nfse-migracao`: o flagd registra a fonte Kubernetes sem o prefixo `core.openfeature.dev/`); vazio, todas |
 | `Admin__Porta` | `8081` | porta interna dos endpoints administrativos |
 | `Admin__Token` | — | segredo do header `X-Admin-Token`; vazio fecha os endpoints |
 | `Sombra__CapacidadeDoCanal` | `1000` | cópias aguardando worker; lido na partida |

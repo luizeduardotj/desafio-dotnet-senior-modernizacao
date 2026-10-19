@@ -1,0 +1,34 @@
+# Só para validar o overlay de produção num k3d descartável, ligado à rede do docker compose da raiz.
+# NÃO é um alvo de deploy. Troca apenas o que é da plataforma e não existe na máquina: endereços do
+# legado/Oracle/observabilidade (vão para o compose) e o cofre (ClusterSecretStore fake com valores de teste).
+# Rollouts, AnalysisTemplates, flagd, FeatureFlag, ExternalSecrets, HPA, PDB e NetworkPolicies são os de produção.
+# Passo a passo e resultados em deploy/k8s/README.md, seção Validação.
+#   kubectl apply -f deploy/k8s/validacao/producao-k3d/plataforma.yaml
+#   kubectl apply -k deploy/k8s/validacao/producao-k3d
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../overlays/producao
+
+patches:
+  - target:
+      kind: Service
+      name: legado
+    patch: |-
+      - op: replace
+        path: /spec/externalName
+        value: webservices
+  - target:
+      kind: Service
+      name: oracle
+    patch: |-
+      - op: replace
+        path: /spec/externalName
+        value: oracle
+  - target:
+      kind: Ingress
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: nfse.localhost

@@ -15,6 +15,8 @@ deploy/k8s/
 └── overlays/
     ├── local/                    k3d na rede do compose; Secrets gerados com valores de teste
     └── producao/                 Argo Rollouts + análise, ExternalSecrets, flagd + FeatureFlag
+validacao/
+└── producao-k3d/                 só para testar overlays/producao num k3d: compose no lugar da plataforma, cofre fake
 ```
 
 ## Topologia
@@ -71,10 +73,10 @@ No overlay **local**, a fachada lê **um arquivo** de flags (`FonteDeFlagsPorCon
 
 `overlays/producao/flagd/` sobe um **flagd** (2 réplicas, PDB, RBAC só de leitura) que observa o CRD `FeatureFlag` `nfse-migracao` por watch na API do Kubernetes. O CR tem as flags no formato do flagd: `migracao.kill-switch`, `<Operacao>.kill-switch` e `<Operacao>.config`.
 
-A fachada de produção consome o flagd (`Flags__Fonte=openfeature` no `fachada-config` do overlay): `FonteDeFlagsOpenFeature` com o provider flagd em **modo in-process**, no stream de sync do Service `flagd:8015`, com seletor `core.openfeature.dev/nfse/nfse-migracao`. A avaliação roda na própria fachada (sem RPC por requisição, cabe no orçamento de ≤ 10 ms) e cada mudança do CR chega pelo stream, em segundos. O mapeamento do CR para `FlagsDeMigracao` e o fail-safe estão no [README da fachada](../../src/Nfse.Fachada/README.md#openfeature--flagd).
+A fachada de produção consome o flagd (`Flags__Fonte=openfeature` no `fachada-config` do overlay): `FonteDeFlagsOpenFeature` com o provider flagd em **modo in-process**, no stream de sync do Service `flagd:8015`, com seletor `nfse/nfse-migracao` (o flagd registra a fonte Kubernetes como `<namespace>/<nome>`, sem o prefixo `core.openfeature.dev/` do `--uri`). A avaliação roda na própria fachada (sem RPC por requisição, cabe no orçamento de ≤ 10 ms) e cada mudança do CR chega pelo stream, em segundos. O mapeamento do CR para `FlagsDeMigracao` e o fail-safe estão no [README da fachada](../../src/Nfse.Fachada/README.md#openfeature--flagd).
 
 - **flagd fora ou stream caído:** o provider emite erro e a fachada passa a mandar tudo ao legado, com `/health/ready` 503 (fail-safe da ADR-0008), até o sync voltar (o provider tenta de novo com backoff de até 60 s). Ver o risco de readiness abaixo.
-- O ConfigMap `fachada-flags` continua montado também em produção, mas **sem efeito** enquanto a fonte for `openfeature`. Falta: medir o drill do nível 1 (< 10 s) e então tirar o ConfigMap do overlay.
+- O ConfigMap `fachada-flags` continua montado também em produção, mas **sem efeito** enquanto a fonte for `openfeature`. O drill do nível 1 já foi medido no cluster (0,12–0,24 s, ver [Validação](#validação)); falta tirar o ConfigMap do overlay.
 
 ### Mapeamento para os níveis do plano (seção 8)
 
@@ -107,8 +109,9 @@ Isso é o rollout das **versões** da fachada e do serviço novo. **Não é o st
 
 - Os `Rollout` usam `workloadRef` para o Deployment da base: o template (imagem, probes, recursos) fica num lugar só, e o Deployment é escalado a zero no overlay. Num cluster que já roda os Deployments, a migração é aplicar primeiro os `Rollout` com `scaleDown: progressively` e só depois o patch de `replicas: 0`.
 - Sem `trafficRouting`: o peso é a proporção de réplicas. Fachada: 34% → 15 min → 67% → 15 min → 100%. Serviço novo: 25% → 50% → **pausa manual** antes de 100% (o cancelamento escreve; alguém olha o dual-run do plano §6.2 e promove com `kubectl argo rollouts promote`).
-- A análise roda em segundo plano desde o primeiro degrau e compara **canário × estável** na mesma janela, com os limites do plano (§6.1, §9): taxa de 5xx até +0,1 p.p. e p99 até 1,2 × o estável. A comparação é relativa porque os `soap:Fault` intencionais (C20) também são 500. Sem tráfego, o resultado fica inconclusivo e o rollout pausa: não se promove às cegas.
-- Premissas da análise **[H]**: os serviços exportam `http.server.request.duration` por OTLP (TODO de OpenTelemetry na fachada e no serviço novo), o OTel Collector anexa o label de pod `rollouts-pod-template-hash` (`k8sattributes`) e `service.name` vira `job` no Prometheus. Até isso existir, a análise fica inconclusiva e todo rollout pausa para decisão humana.
+- A análise roda em segundo plano desde o primeiro degrau e compara **canário × estável** na mesma janela, com os limites do plano (§6.1, §9): taxa de 5xx até +0,1 p.p. e p99 até 1,2 × o estável. A comparação é relativa porque os `soap:Fault` intencionais (C20) também são 500. Sem tráfego, o resultado fica inconclusivo e o rollout pausa: não se promove às cegas. A primeira medição espera 7 min (`initialDelay`): 2 min de aquecimento do pod novo mais a janela de 5 min. Sem isso, o p99 de um pod frio reprovou uma versão idêntica à estável (ver [Validação](#validação)).
+- O peso por proporção de réplicas só vale se o tráfego chegar às réplicas novas. A fachada recicla as conexões com o legado e o novo a cada 1 min (`PooledConnectionLifetime`); sem isso, sob carga constante, o canário do `nfse-novo` e o scale-out do HPA não recebiam nada da fachada (medido).
+- Premissas da análise, conferidas no Prometheus do otel-lgtm com o overlay aplicado em k3d **[M]**: os serviços exportam `http.server.request.duration` por OTLP; o `job` é `nfse/<service.name>` (o `OTEL_RESOURCE_ATTRIBUTES` dos Deployments põe `service.namespace=nfse`); o hash da revisão sai do label `k8s_pod_name` (`<rollout>-<hash>-<sufixo>`), que o Prometheus promove de `k8s.pod.name`, sem depender do `k8sattributes` no Collector; as probes ficam fora da conta. Num Prometheus da plataforma que não promova `k8s.pod.name`, a análise fica inconclusiva e todo rollout pausa para decisão humana.
 
 ## Como aplicar no k3d
 
@@ -181,4 +184,38 @@ kubectl kustomize deploy/k8s/overlays/producao | kubeconform -strict -summary -s
 
 Os CRDs de produção (Rollout e AnalysisTemplate do Argo Rollouts, ExternalSecret, FeatureFlag do OpenFeature operator) são validados de verdade pelo [datreeio/CRDs-catalog](https://github.com/datreeio/CRDs-catalog): todos existem lá, então **não se usa `-ignore-missing-schemas`** e o resumo mostra 0 ignorados. Se um CRD novo não tiver schema no catálogo, o job falha em vez de pular em silêncio. Para confirmar que a checagem pega erro, renomear `maxSurge` em um Rollout faz o kubeconform reprovar o recurso (`additional properties 'maxSurgeX' not allowed`).
 
-O job `manifests` do [CI](../../.github/workflows/ci.yml) repete isso a cada push e PR, com kubectl (kustomize embutido) e kubeconform em versão e SHA-256 fixos. Limite: valida o formato, não o comportamento; o overlay de produção (Argo Rollouts, flagd, External Secrets) não foi aplicado em cluster.
+O job `manifests` do [CI](../../.github/workflows/ci.yml) repete isso a cada push e PR, com kubectl (kustomize embutido) e kubeconform em versão e SHA-256 fixos. Limite: valida o formato, não o comportamento. O comportamento do overlay de produção foi verificado em cluster; ver a seção seguinte.
+
+### Overlay de produção em k3d
+
+**Cluster k3d `nfse-prod`, 2026-10-19 [M]** (k3d 5.9, k3s 1.36, sem Traefik; Docker Desktop com 8 CPUs e 12 GB). Instalado com versões fixadas: Argo Rollouts (chart 2.43.8, v1.10.1), External Secrets Operator (chart 2.13.0), OpenFeature Operator (v0.9.3, com cert-manager v1.21.2), ingress-nginx (chart 4.15.1). Os manifests são os de `overlays/producao`; [`validacao/producao-k3d`](validacao/producao-k3d/kustomization.yaml) troca só o que é da plataforma: endereços do legado, do Oracle e da observabilidade (para o compose) e o cofre, um `ClusterSecretStore` `cofre-nfse` com o provider **fake** do External Secrets e valores de teste ([`plataforma.yaml`](validacao/producao-k3d/plataforma.yaml)). A análise consulta o Prometheus do otel-lgtm do compose. Tráfego: k6 na rede do compose, `ConsultarNfse` a 4 req/s pelo ingress-nginx, com `ConsultarNfse` em `novo` 100% no CR (só no cluster).
+
+```bash
+k3d cluster create nfse-prod --network desafio-dotnet-senior-modernizacao_default --k3s-arg "--disable=traefik@server:0" --kubeconfig-update-default=false --kubeconfig-switch-context=false --wait
+```
+
+```bash
+kubectl apply -f deploy/k8s/validacao/producao-k3d/plataforma.yaml && kubectl apply -k deploy/k8s/validacao/producao-k3d
+```
+
+As imagens precisam da tag que o overlay espera (`registry.substituir.invalid/nfse/nfse-*:0.1.0`). Com o Docker Desktop no image store do containerd, `k3d image import` termina com sucesso mas a imagem não aparece no `crictl images`; o que funcionou foi `docker save <imagem> | docker exec -i k3d-nfse-prod-server-0 ctr -n k8s.io images import -`.
+
+| Cenário | Resultado |
+| --- | --- |
+| `apply` do zero (com as correções abaixo) | 34 objetos; ExternalSecrets `SecretSynced` pelo cofre fake; Pod Security `restricted` aceitou fachada, nfse-novo e flagd; os dois `Rollout` `Healthy` em 5 s. O `nfse-novo` nasce com 1 réplica (o Rollout não declara `replicas`) e o HPA leva a 3 |
+| Kill switch nível 1 (`patch` do `defaultVariant` de `migracao.kill-switch` no CR), 5 trocas sob 30 req/s | todas as 3 réplicas no novo estado em **0,12–0,24 s** depois do patch; a última requisição no estado antigo saiu em ≤ 0,07 s; 0 erros. Referência no compose: 0,4 s |
+| Canário da fachada 0.1.0 → 0.1.1 | canário com 1/3 do tráfego (34%); análise aprovou duas vezes (5xx: diferença 0; p99: 0,94× e 1,00×); promovido por 34% → 67% → 100% |
+| Canário do `nfse-novo` 0.1.0 → 0.1.1 (mesmo binário) | 25% (1 canário + 3 estáveis) → 50% (2 + 3) → pausa manual → 100%; análise aprovou (5xx: diferença 0; p99: 1,03× e 1,09×) |
+| Rollback automático pela análise (1ª tentativa, sem o `initialDelay`) | p99 do canário 2,40× e depois 1,27× o estável → `failureLimit` estourado e o Argo abortou 10 s depois da 2ª medição; canário escalado a zero, 3 estáveis atendendo |
+| `abort` manual do canário 0.1.2 com tráfego (10 req/s; o canário já tinha atendido ≥ 126 requisições) | canário fora em **6,3 s** (inclui os 5 s do `preStop`); devolver o spec à versão estável deixou o Rollout `Healthy` em 0,1 s, sem pods novos; **0 de 1.213** falhas |
+| Tráfego durante drills, canários e rollbacks | k6: **0 de 8.762** falhas, p99 17 ms |
+
+Erros reais achados e corrigidos (um commit `fix(...)` cada):
+
+- `ExternalSecret` em `external-secrets.io/v1beta1`: o External Secrets atual só serve `v1`, e o `apply` falhava.
+- Seletor do flagd: o flagd v0.11.1 registra a fonte `core.openfeature.dev/nfse/nfse-migracao` como `nfse/nfse-migracao`. Com o seletor antigo, o stream de sync vinha vazio, toda flag dava `FlagNotFound` e as 3 réplicas da fachada ficavam fora do Service (readiness 503).
+- Análise: o `job` no Prometheus é `nfse/<service.name>`; `rollouts_pod_template_hash` não existe (o hash sai de `k8s_pod_name`); sem 5xx a taxa ficava vazia (inconclusiva) no caso bom; as probes contavam como erro; e a janela começando no pod frio reprovava uma versão idêntica (`initialDelay: 7m`).
+- `matchLabelKeys: pod-template-hash` não tem efeito sob o Argo Rollouts (os pods só têm `rollouts-pod-template-hash`).
+- Fachada sem `PooledConnectionLifetime`: com conexões keep-alive eternas, o canário do `nfse-novo` e uma réplica estável ficaram 10 min sem nenhuma requisição. Corrigido no código (1 min).
+
+Limites desta validação: um nó só (o espalhamento por nó e zona não é exercitado); CNI do k3s (kube-router), não o de produção; a análise só viu `ConsultarNfse` a poucas req/s, e com tráfego real o p99 por janela de 5 min é bem mais estável que aqui; o cofre é fake. Durante a primeira metade do teste, a VM do Docker ficou sem memória (swap cheio) e a API do k3s caiu várias vezes; a 1ª tentativa de rollback automático é dessa fase. Os números da tabela, menos esse, são da segunda metade, com 12 GB e sem pressão.

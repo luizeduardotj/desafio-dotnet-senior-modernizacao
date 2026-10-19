@@ -42,7 +42,9 @@ configMapGenerator:
       - Flags__Fonte=openfeature
       - Flags__Flagd__Host=flagd
       - Flags__Flagd__Porta=8015
-      - Flags__Flagd__Seletor=core.openfeature.dev/nfse/nfse-migracao
+      # O flagd (v0.11.1) registra a fonte Kubernetes sem o prefixo do --uri: o seletor é <namespace>/<nome>.
+      # Com "core.openfeature.dev/nfse/nfse-migracao" o stream vem vazio e toda flag dá FlagNotFound (medido em k3d).
+      - Flags__Flagd__Seletor=nfse/nfse-migracao
   - name: nfse-novo-config
     behavior: merge
     literals:
@@ -73,6 +75,18 @@ patches:
   # revisão fica saudável. O template continua no Deployment da base: um lugar só para a imagem.
   - path: fachada-sob-rollout.yaml
   - path: nfse-novo-sob-rollout.yaml
+  # Sob o Argo Rollouts os pods têm rollouts-pod-template-hash, não pod-template-hash (conferido em k3d).
+  # Sem a troca o matchLabelKeys da base é ignorado e o espalhamento conta estável + canário juntos.
+  - target:
+      kind: Deployment
+      name: fachada|nfse-novo
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/topologySpreadConstraints/0/matchLabelKeys/0
+        value: rollouts-pod-template-hash
+      - op: replace
+        path: /spec/template/spec/topologySpreadConstraints/1/matchLabelKeys/0
+        value: rollouts-pod-template-hash
   # O HPA passa a escalar o Rollout, não o Deployment (que fica em zero).
   - target:
       kind: HorizontalPodAutoscaler

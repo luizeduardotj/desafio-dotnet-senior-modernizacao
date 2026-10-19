@@ -1,8 +1,13 @@
-# Métricas da ADR-0012 vistas no Prometheus da plataforma. Premissas [H]:
-#  - os serviços exportam http.server.request.duration por OTLP (TODO nos dois: ver README);
-#  - o OTel Collector anexa o label de pod rollouts-pod-template-hash (processador k8sattributes),
-#    que chega ao Prometheus como rollouts_pod_template_hash;
-#  - service.name vira o label job.
+# Métricas da ADR-0012 vistas no Prometheus da plataforma, pelo receptor OTLP. Premissas, conferidas no
+# Prometheus do otel-lgtm com o overlay aplicado em k3d [M]:
+#  - os serviços exportam http.server.request.duration por OTLP (Nfse.Observabilidade);
+#  - o job é "<service.namespace>/<service.name>": o OTEL_RESOURCE_ATTRIBUTES dos Deployments põe
+#    service.namespace=nfse, então o job é nfse/nfse-fachada e nfse/nfse-novo, não só o service.name;
+#  - k8s.pod.name (do mesmo OTEL_RESOURCE_ATTRIBUTES) é promovido a label k8s_pod_name (está na lista
+#    recomendada de promote_resource_attributes do Prometheus). O pod de um Rollout se chama
+#    <rollout>-<rollouts-pod-template-hash>-<sufixo>, então o hash sai do nome do pod, sem depender do
+#    k8sattributes no Collector;
+#  - as probes (/health/*) ficam fora: o 503 do readiness na subida de um pod contaria como erro do canário.
 # Limites espelham o plano (§6.1, §9): faults até +0,1 p.p. e p99 até 1,2 x o estável. Em 5xx
 # entram os soap:Fault que o legado e o novo devolvem de propósito (C20); por isso a comparação é
 # canário x estável, nunca um limite absoluto.
@@ -17,12 +22,18 @@ spec:
     - name: hash-estavel
   metrics:
     - name: taxa-5xx-canario-menos-estavel
+      # A janela de 5 min não pode começar no pod frio: em k3d, o mesmo binário teve p99 de 23 ms nos 2 primeiros
+      # minutos do canário e 9,7 ms depois (estável: 9,2 ms), e falhou duas vezes por isso. 2 min de aquecimento
+      # (JIT, pool do Oracle) + 5 min de janela.
+      initialDelay: 7m
       interval: 2m
       count: 15
       failureLimit: 1
       inconclusiveLimit: 3
       # Sem tráfego (vetor vazio ou NaN) não passa nem falha: fica inconclusivo e o rollout pausa
       # para alguém decidir. Não promover às cegas uma versão que ninguém exercitou.
+      # O "or vector(0)" vale só no numerador: com tráfego e nenhum 5xx a série de 5xx não existe, e sem ele
+      # o resultado seria vazio (inconclusivo) justamente no caso bom.
       successCondition: len(result) > 0 && result[0] <= 0.001
       failureCondition: len(result) > 0 && result[0] > 0.001
       provider:
@@ -30,15 +41,15 @@ spec:
           address: http://prometheus.observabilidade:9090
           query: |
             (
-              sum(rate(http_server_request_duration_seconds_count{job="{{args.servico}}", rollouts_pod_template_hash="{{args.hash-canario}}", http_response_status_code=~"5.."}[5m]))
+              (sum(rate(http_server_request_duration_seconds_count{job="nfse/{{args.servico}}", k8s_pod_name=~".+-{{args.hash-canario}}-[a-z0-9]+", http_route!~"/health/.*", http_response_status_code=~"5.."}[5m])) or vector(0))
               /
-              sum(rate(http_server_request_duration_seconds_count{job="{{args.servico}}", rollouts_pod_template_hash="{{args.hash-canario}}"}[5m]))
+              sum(rate(http_server_request_duration_seconds_count{job="nfse/{{args.servico}}", k8s_pod_name=~".+-{{args.hash-canario}}-[a-z0-9]+", http_route!~"/health/.*"}[5m]))
             )
             -
             (
-              sum(rate(http_server_request_duration_seconds_count{job="{{args.servico}}", rollouts_pod_template_hash="{{args.hash-estavel}}", http_response_status_code=~"5.."}[5m]))
+              (sum(rate(http_server_request_duration_seconds_count{job="nfse/{{args.servico}}", k8s_pod_name=~".+-{{args.hash-estavel}}-[a-z0-9]+", http_route!~"/health/.*", http_response_status_code=~"5.."}[5m])) or vector(0))
               /
-              sum(rate(http_server_request_duration_seconds_count{job="{{args.servico}}", rollouts_pod_template_hash="{{args.hash-estavel}}"}[5m]))
+              sum(rate(http_server_request_duration_seconds_count{job="nfse/{{args.servico}}", k8s_pod_name=~".+-{{args.hash-estavel}}-[a-z0-9]+", http_route!~"/health/.*"}[5m]))
             )
 ---
 apiVersion: argoproj.io/v1alpha1
@@ -52,6 +63,10 @@ spec:
     - name: hash-estavel
   metrics:
     - name: p99-canario-sobre-estavel
+      # A janela de 5 min não pode começar no pod frio: em k3d, o mesmo binário teve p99 de 23 ms nos 2 primeiros
+      # minutos do canário e 9,7 ms depois (estável: 9,2 ms), e falhou duas vezes por isso. 2 min de aquecimento
+      # (JIT, pool do Oracle) + 5 min de janela.
+      initialDelay: 7m
       interval: 2m
       count: 15
       failureLimit: 1
@@ -64,6 +79,6 @@ spec:
         prometheus:
           address: http://prometheus.observabilidade:9090
           query: |
-            histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{job="{{args.servico}}", rollouts_pod_template_hash="{{args.hash-canario}}"}[5m])))
+            histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{job="nfse/{{args.servico}}", k8s_pod_name=~".+-{{args.hash-canario}}-[a-z0-9]+", http_route!~"/health/.*"}[5m])))
             /
-            histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{job="{{args.servico}}", rollouts_pod_template_hash="{{args.hash-estavel}}"}[5m])))
+            histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{job="nfse/{{args.servico}}", k8s_pod_name=~".+-{{args.hash-estavel}}-[a-z0-9]+", http_route!~"/health/.*"}[5m])))

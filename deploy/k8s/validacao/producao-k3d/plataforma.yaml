@@ -1,0 +1,52 @@
+# O que a plataforma entrega em produção e o k3d de validação não tem. Valores de TESTE, nunca de produção.
+#  - namespace observabilidade: Prometheus e OTel Collector do otel-lgtm do compose (ExternalName pela rede
+#    compartilhada), nos nomes que o overlay de produção usa;
+#  - namespace nfse-operacao: de onde o nível 2 do kill switch é disparado;
+#  - ClusterSecretStore "cofre-nfse" com o provider fake do External Secrets, no lugar do cofre real.
+#    As senhas são as do docker-compose.yml (db/moderno/01_usuarios.sql no ambiente local).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observabilidade
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: observabilidade
+spec:
+  type: ExternalName
+  externalName: otel-lgtm
+  ports:
+    - name: http
+      port: 9090
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: observabilidade
+spec:
+  type: ExternalName
+  externalName: otel-lgtm
+  ports:
+    - name: otlp-grpc
+      port: 4317
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nfse-operacao
+---
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: cofre-nfse
+spec:
+  provider:
+    fake:
+      data:
+        - key: nfse/fachada
+          value: '{"admin-token":"token-admin-k3d-validacao"}'
+        - key: nfse/oracle
+          value: '{"connection-string-app":"User Id=NFSE_MODERNO_APP;Password=moderno_app_dev_123;Data Source=oracle:1521/FREEPDB1;Min Pool Size=2;Max Pool Size=20;Connection Timeout=15","connection-string-ro":"User Id=NFSE_MODERNO_RO;Password=moderno_ro_dev_123;Data Source=oracle:1521/FREEPDB1;Min Pool Size=1;Max Pool Size=10;Connection Timeout=15"}'

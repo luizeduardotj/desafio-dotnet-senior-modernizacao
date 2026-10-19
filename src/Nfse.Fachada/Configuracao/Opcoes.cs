@@ -85,6 +85,6 @@ public sealed class OpcoesFlagd
     [Range(1, 65535)]
     public int? Porta { get; set; }
 
-    /// <summary>Fonte do flagd no modo in-process (ex.: <c>core.openfeature.dev/nfse/nfse-migracao</c>).</summary>
+    /// <summary>Fonte do flagd no modo in-process (ex.: <c>nfse/nfse-migracao</c>, a fonte Kubernetes do flagd sem o prefixo <c>core.openfeature.dev/</c>).</summary>
     public string? Seletor { get; set; }
 }

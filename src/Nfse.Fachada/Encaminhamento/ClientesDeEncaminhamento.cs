@@ -28,6 +28,9 @@ public sealed class ClientesDeEncaminhamento(HttpMessageInvoker legado, HttpMess
         AutomaticDecompression = DecompressionMethods.None,
         UseCookies = false,
         ConnectTimeout = TimeSpan.FromSeconds(5),
+        // O Service do Kubernetes balanceia por conexão. Sem prazo de vida, sob carga constante a conexão nunca fica
+        // ociosa e réplicas novas (canário do Argo Rollouts, scale-out do HPA) não recebem nada (medido em k3d).
+        PooledConnectionLifetime = TimeSpan.FromMinutes(1),
         EnableMultipleHttp2Connections = true,
         ActivityHeadersPropagator = new ReverseProxyPropagator(DistributedContextPropagator.Current),
     });
