@@ -1,6 +1,6 @@
 # CLAUDE.md — regras para agentes neste repositório
 
-Desafio técnico de modernização do Nota Carioca (NFS-e do Rio): extrair `ConsultarNfse`, `ConsultarNfseServicoTomado` e `CancelarNfse` do monolito por strangler fig. O enunciado está no [README.md](README.md); as decisões estão em [docs/adr/](docs/adr/README.md) e os critérios operacionais em [docs/plano-de-migracao.md](docs/plano-de-migracao.md). **Leia a ADR da área antes de mexer nela.** Código que contradiz uma ADR aceita exige uma ADR nova que a substitua.
+Desafio técnico de modernização do Nota Carioca (NFS-e do Rio): extrair `ConsultarNfse`, `ConsultarNfseServicoTomado` e `CancelarNfse` do monolito por strangler fig. O enunciado está em [docs/desafio.md](docs/desafio.md) e o README da raiz é o da entrega; as decisões estão em [docs/adr/](docs/adr/README.md) e os critérios operacionais em [docs/plano-de-migracao.md](docs/plano-de-migracao.md). **Leia a ADR da área antes de mexer nela.** Código que contradiz uma ADR aceita exige uma ADR nova que a substitua.
 
 ## Mapa
 

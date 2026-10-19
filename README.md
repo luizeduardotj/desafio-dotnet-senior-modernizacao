@@ -1,188 +1,178 @@
-# Desafio Técnico — Engenheiro(a) de Software Sênior — Modernização (.NET)
+# Nota Carioca — extração da consulta e do cancelamento de NFS-e
 
-## Contexto
+Resposta ao [desafio de modernização](docs/desafio.md): tirar `ConsultarNfse`, `ConsultarNfseServicoTomado` e `CancelarNfse` de dentro do monolito .NET Framework + Oracle **sem que nenhum ERP perceba**, com caminho de volta a qualquer momento.
 
-O **Nota Carioca** é a plataforma de NFS-e do Rio de Janeiro: um monolito .NET Framework + Oracle 19c que processa milhões de notas fiscais por ano. Milhares de ERPs de contribuintes conversam com ele por web services SOAP, e muitos não são atualizados há anos. Um novo app e o novo portal do contribuinte precisam de uma API moderna.
+## Em resumo
 
-A missão do time de modernização é tirar capacidades de dentro do monolito **sem que nenhum contribuinte perceba**: sem big bang, sem janela de manutenção, com caminho de volta a qualquer momento.
+- **As três operações estão extraídas** para um serviço novo em .NET 10, atrás de uma fachada que decide, por operação, entre `legado`, `sombra` e `novo`, com canário por prestador e percentual e kill switch em segundos.
+- **O contrato SOAP do serviço novo é idêntico ao do legado byte a byte** em 45 dos 47 casos do golden master capturado do legado, contra Oracle real. As 2 diferenças são decisões conscientes do catálogo (DTD recusada e `soap:Fault` sem a mensagem interna do Oracle).
+- **O cancelamento continua decidido pelo PL/SQL do legado**, chamado por um wrapper em schema próprio que acrescenta lock e devolve o snapshot. A regra também existe no domínio como função pura e roda em paralelo (dual-run) para medir divergências. Nenhuma tabela do legado foi alterada.
+- **A sombra funciona para leitura e para escrita.** No cancelamento, o novo avalia a decisão **sem escrever**, com um usuário Oracle só de leitura, sobre o estado anterior reconstruído.
+- **Comportamentos não documentados encontrados e testados**, entre eles dois bugs do legado confirmados em execução: a guia que não desconta a nota cancelada (K07) e a escrita dupla em cancelamentos concorrentes (K08). Catálogo completo em [ADR-0004](docs/adr/0004-comportamentos-legados-nao-documentados.md).
+- Cerca de 400 testes: unitários, arquitetura, integração com Oracle real, contrato REST e paridade.
 
-Este repositório contém uma **réplica didática** do monolito, com C# no estilo .NET Framework, VB.NET, regras dentro de packages e triggers PL/SQL e um endpoint SOAP (`/NfseWS.asmx`). Sua tarefa é extrair dele a **consulta e o cancelamento de NFS-e**.
-
-## O legado
-
+```mermaid
+flowchart LR
+    ERP[ERPs] -- SOAP --> F[Fachada YARP :8080]
+    F -- legado / sombra --> L[Legado .NET 4.8]
+    F -- novo / cópia da sombra --> N[Serviço novo .NET 10]
+    F -. sombra do cancelamento .-> NI[Serviço novo :8081 interno]
+    App[App e portal] -- REST /api/v1 --> N
+    L --> O[(Oracle NFSE_OWNER)]
+    N -- views e wrapper --> M[(NFSE_MODERNO)] --> O
+    NI -- só leitura --> M
+    F & N -- OTLP --> G[otel-lgtm: Tempo, Prometheus, Loki, Grafana]
 ```
-legado/
-  src/NotaCarioca.Dominio/      VB.NET — cálculo de ISS, validação de CPF/CNPJ, competência
-  src/NotaCarioca.Dados/        C# — acesso a dados (ADO.NET / ODP.NET)
-  src/NotaCarioca.Servicos/     C# — lotes de RPS, consultas, cancelamento, geração de XML
-  src/NotaCarioca.WebServices/  host que emula o endpoint ASMX (/NfseWS.asmx)
-db/                             schema, packages (PKG_NFSE, PKG_GUIA), triggers e cargas
-tools/                          gerador de lotes de RPS e exemplos de requisições SOAP
-```
-
-```bash
-docker compose up -d --build     # Oracle + legado
-# a primeira subida cria o schema e carrega ~2 milhões de notas: leva alguns minutos
-curl http://localhost:8080/health
-just lote 1000                   # emite notas novas enviando um lote com 1.000 RPS
-```
-
-O legado roda em `net48` e `net8.0`. Em produção ele roda em .NET Framework 4.8 sobre IIS, e o host em `NotaCarioca.WebServices` só existe para rodar a réplica em qualquer sistema operacional. O banco local é Oracle 23ai Free, mas produção é 19c.
-
-### Operações SOAP
-
-| Operação | O que faz | Escopo do desafio |
-| --- | --- | --- |
-| `RecepcionarLoteRps` | recebe um lote de RPS; o processamento é assíncrono | fica no legado |
-| `ConsultarSituacaoLoteRps` / `ConsultarLoteRps` | situação e resultado do lote | fica no legado |
-| `ConsultarNfse` | prestador consulta as notas que emitiu | **extrair** |
-| `ConsultarNfseServicoTomado` | tomador consulta as notas que recebeu | **extrair** |
-| `CancelarNfse` | prestador cancela uma nota | **extrair** |
-
-### Manual de integração (resumo)
-
-É o que os contribuintes receberam há anos:
-
-- Datas e horas seguem a ISO 8601.
-- CNPJ tem 14 caracteres e CPF tem 11.
-- O período de consulta vai de `DataInicial` a `DataFinal`, inclusive, com no máximo 31 dias.
-- As consultas são paginadas, com 50 notas por página.
-- Uma nota pode ser cancelada até o dia 10 (inclusive) do mês seguinte à competência, exceto se a guia da competência já estiver paga ou se a nota tiver sido substituída.
-- Ao cancelar uma nota, a guia da competência é recalculada.
-
-Não há outra documentação. Como em todo legado, **o comportamento em produção é a especificação real**, e ele nem sempre bate com o manual.
 
 ## Como rodar
 
-O compose sobe tudo do zero: Oracle (legado e schema `NFSE_MODERNO`), legado, fachada, serviço novo e observabilidade. A primeira carga leva alguns minutos e usa de 2 a 3 GB de RAM.
+Pré-requisitos: Docker com pelo menos 8 GB para a VM (o Oracle usa 2 a 3 GB) e, para os testes, o SDK do .NET 10.
 
 ```bash
-cp .env.example .env                 # opcional: senhas e token admin de desenvolvimento
-docker compose up -d --build --wait  # espera todos os serviços saudáveis
-tools/smoke-compose.sh               # health e ConsultarNfse igual pela fachada e no legado
-docker compose down -v               # derruba e apaga o banco
+cp .env.example .env                 # senhas e token admin de desenvolvimento
+docker compose up -d --build --wait  # Oracle (com carga e NFSE_MODERNO), legado, fachada, serviço novo e otel-lgtm
+tools/smoke-compose.sh               # health e ConsultarNfse igual pela fachada e direto no legado
 ```
 
-| Serviço | URL | |
+A primeira subida carrega cerca de 2 milhões de notas, o que leva perto de 1 minuto num Mac M-series. `docker compose down -v` derruba tudo e apaga o banco.
+
+| Serviço | Endereço | Observação |
 | --- | --- | --- |
-| fachada (SOAP) | `http://127.0.0.1:8080/NfseWS.asmx` | todo o SOAP entra por aqui; `/health` é o do legado, `/health/ready` é o da fachada |
-| fachada (admin) | `http://127.0.0.1:8081/admin/kill-switch` | header `X-Admin-Token` (`FACHADA_ADMIN_TOKEN`; vazio fecha) |
-| serviço novo | `http://127.0.0.1:8090/health/ready` | ainda sem SOAP nem REST |
-| Grafana | `http://127.0.0.1:3000` | dashboard **NFS-e › Migração por operação**; traces no Tempo, logs no Loki |
+| Fachada (SOAP) | `http://127.0.0.1:8080/NfseWS.asmx` | todo o SOAP entra por aqui |
+| Fachada (admin) | `http://127.0.0.1:8081/admin/kill-switch` | header `X-Admin-Token` (`FACHADA_ADMIN_TOKEN` do `.env`) |
+| Serviço novo | `http://127.0.0.1:8090` | SOAP `/NfseWS.asmx`, REST `/api/v1`, OpenAPI `/openapi/v1.json`; a porta interna 8081 não é publicada |
+| Grafana | `http://127.0.0.1:3000` | dashboard **NFS-e › Migração por operação**, traces no Tempo, logs no Loki |
 | Oracle | `127.0.0.1:1521/FREEPDB1` | `NFSE_OWNER` (legado), `NFSE_MODERNO_APP` e `NFSE_MODERNO_RO` (serviço novo) |
 
-O legado não publica porta: só é alcançável pela fachada ou de dentro da rede do compose. Os modos de migração ficam em [`deploy/flags/flags.json`](deploy/flags/flags.json), recarregado sem restart ([fachada](src/Nfse.Fachada/README.md#flags)).
+O legado não publica porta: só é alcançável pela fachada.
 
-## O que construir
+### Testes
 
-### 1. A fachada (strangler fig)
+```bash
+dotnet test Nfse.Moderno.slnx                     # unitários, arquitetura, fachada, host, contrato REST
+dotnet test legado/tests/NotaCarioca.Testes -f net8.0
 
-Todo o tráfego de `/NfseWS.asmx` passa a entrar por uma fachada sua. Ela decide, **por operação**, quem atende:
+# paridade com o golden master, com o compose de pé
+export NFSE_PARIDADE_ORACLE="User Id=NFSE_MODERNO_APP;Password=moderno_app_dev_123;Data Source=127.0.0.1:1521/FREEPDB1"
+export NFSE_PARIDADE_ORACLE_RO="User Id=NFSE_MODERNO_RO;Password=moderno_ro_dev_123;Data Source=127.0.0.1:1521/FREEPDB1"
+dotnet test tests/Nfse.Paridade.Testes
+```
 
-- **`legado`**: comportamento de hoje.
-- **`sombra`**: o cliente recebe a resposta do legado; o serviço novo processa a mesma requisição e as respostas são comparadas. Cada divergência é registrada com o suficiente para ser reproduzida, sem expor dados pessoais. A sombra não pode piorar a latência nem a disponibilidade para o cliente.
-- **`novo`**: o serviço novo atende.
+A paridade do cancelamento muda o banco, então exige a linha de base restaurada e o relógio congelado. O procedimento está em [tests/paridade/README.md](tests/paridade/README.md).
 
-O roteamento precisa ser controlável por prestador (lista de inscrições) e por percentual de tráfego, alterável **em tempo de execução, sem deploy**, com um kill switch que devolva tudo ao legado em segundos. As operações fora do escopo continuam indo para o legado sem nenhuma alteração.
+## Como alternar os modos e ver o resultado
 
-Pense no que "sombra" significa para cada operação. Elas não são todas iguais.
+Os modos ficam em [`deploy/flags/flags.json`](deploy/flags/flags.json). A fachada recarrega o arquivo em segundos, sem restart. Tudo começa em `legado`.
 
-### 2. O serviço novo
+```json
+"ConsultarNfse": { "Modo": "legado", "Percentual": 0, "KillSwitch": false, "Inclusao": [], "Exclusao": [], "Sombra": { "Amostragem": 0 } }
+```
 
-Em **.NET 8+**, com arquitetura limpa e CQRS onde fizer sentido. Ele expõe:
+| Para | Altere | Efeito |
+| --- | --- | --- |
+| **Sombra** | `"Modo": "sombra"`, `"Sombra": { "Amostragem": 100 }` | o ERP recebe o legado; o novo é comparado fora do caminho |
+| **Canário por prestador** | `"Modo": "novo"`, `"Inclusao": ["10000001"]` | só esse prestador é atendido pelo novo |
+| **Canário por percentual** | `"Modo": "novo"`, `"Percentual": 10` | 10% das chaves (hash estável por prestador) vão ao novo |
+| **Novo 100%** | `"Modo": "novo"`, `"Percentual": 100` | a operação inteira é atendida pelo novo |
+| **Kill switch** | `"KillSwitch": true` na operação ou em `Migracao` | tudo volta ao legado |
 
-- **uma API REST** para o app e o portal. O design é seu: versionamento, paginação, erros (ProblemDetails), OpenAPI;
-- **uma camada anticorrupção** que fala o contrato SOAP do legado, para que a fachada possa direcionar os ERPs ao serviço novo sem que eles mudem nada.
+Kill switch de emergência sem mexer no arquivo, válido na réplica:
 
-O domínio do serviço novo não conhece XML, SOAP nem os códigos e convenções do legado.
+```bash
+curl -X POST -H "X-Admin-Token: desenvolvimento-local" http://127.0.0.1:8081/admin/kill-switch                        # global
+curl -X POST -H "X-Admin-Token: desenvolvimento-local" "http://127.0.0.1:8081/admin/kill-switch?operacao=CancelarNfse"
+curl -X DELETE -H "X-Admin-Token: desenvolvimento-local" http://127.0.0.1:8081/admin/kill-switch
+```
 
-### 3. Dados e regras de negócio
+### Roteiro de demonstração
 
-Durante a transição, o legado continua emitindo notas e mantendo as guias. As regras de cancelamento e o efeito do cancelamento na guia estão hoje no banco (`PKG_NFSE`, `PKG_GUIA`, triggers). Cabe a você decidir de quem são os dados nessa fase, se a regra continua no banco, é encapsulada ou é reimplementada, e de onde o lado de consulta lê. Não existe resposta certa. Esperamos uma decisão bem justificada, com plano de reversão.
+Envie um exemplo e mude o modo entre um envio e outro:
 
-### 4. Paridade comprovada
+```bash
+tools/exemplos/executar.sh http://127.0.0.1:8080/NfseWS.asmx 04-consultar-nfse.xml
+docker compose logs --since 30s fachada | grep -o '"Message":"SOAP[^"]*"'
+```
 
-Os ERPs dependem de comportamentos que **não estão no manual**. Encontre-os e decida, caso a caso, o que preservar no contrato SOAP e o que corrigir na API nova. Esperamos:
+Foi o que este roteiro mostrou no compose:
 
-- testes de caracterização do legado (golden master) que rodem contra o legado e contra o serviço novo;
-- testes de contrato para a API REST;
-- divergências da sombra explicadas: cada uma é bug do novo, bug do legado ou decisão consciente.
+| Modo | Log da fachada | Resultado |
+| --- | --- | --- |
+| `legado` | `SOAP ConsultarNfse -> Legado (ModoLegado) status 200` | resposta do legado |
+| `sombra` | `SOAP ConsultarNfse -> Legado (Sombra) status 200` | `sombra_comparacoes_total{resultado="igual"}` |
+| `novo` 100% | `SOAP ConsultarNfse -> Novo (Percentual) status 200` | resposta **idêntica** à do legado (`cmp`) |
+| kill switch | `SOAP ConsultarNfse -> Legado (KillSwitch) status 200` | de volta ao legado |
+| `sombra` no `CancelarNfse` (06e) | `SOAP CancelarNfse -> Legado (Sombra) status 200` | avaliação sem escrita no novo: `igual` |
 
-### 5. Observabilidade
+No Grafana, o dashboard **Migração por operação** mostra as requisições por destino e resultado, o p99 de cada lado, os fallbacks e a linha **Sombra** (comparações, divergências por classe, descartes e atraso). Cada requisição tem trace no Tempo, com o span da fachada e o span filho do destino; os logs carregam `TraceId`.
 
-- Traces OpenTelemetry de ponta a ponta (fachada → legado ou novo → Oracle) com propagação W3C.
-- Logs estruturados correlacionados ao trace.
-- Métricas de requisições e latência por operação e modo, e de divergências na sombra.
-- Um backend de traces e métricas no compose (Jaeger, Tempo, SigNoz, o que preferir).
+> `tools/exemplos/executar.sh` sem argumentos também envia o lote (`01`) e o cancelamento (`06`), que mudam o banco.
 
-Instrumentar o legado é opcional. A fachada precisa dar visibilidade sobre ele.
+### API REST
 
-### 6. Entrega e operação
+A API exige JWT. A claim `inscricoes` autoriza por prestador, e a claim `documento` identifica o tomador. Em desenvolvimento, rode o serviço novo localmente e gere um token com o `dotnet user-jwts`:
 
-- `docker compose up` sobe tudo do zero: Oracle, legado, fachada, serviço novo e observabilidade.
-- Manifests Kubernetes (Kustomize ou Helm) para a fachada e o serviço novo, com probes, recursos, configuração das flags e estratégia de rollout.
-- CI (GitHub Actions) com build, testes unitários, de integração (Oracle real), de contrato e de paridade, além do build de imagens.
+```bash
+TOKEN=$(dotnet user-jwts create --project src/Nfse.Host --audience nfse-api \
+  --claim inscricoes=10000001 --claim documento=01234567000195 --output token)
+ConnectionStrings__Oracle="User Id=NFSE_MODERNO_APP;Password=moderno_app_dev_123;Data Source=127.0.0.1:1521/FREEPDB1" \
+  Porta=8095 Interno__Porta=8096 ASPNETCORE_ENVIRONMENT=Development dotnet run --project src/Nfse.Host --no-launch-profile &
+curl -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8095/api/v1/prestadores/10000001/nfse?dataInicial=2026-10-01&dataFinal=2026-10-31"
+curl -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8095/api/v1/tomador/nfse?dataInicial=2026-10-01&dataFinal=2026-10-31"
+```
 
-### 7. Decisões e plano
+No compose, o serviço novo não tem emissor de tokens configurado, então a REST responde 401. Em produção, o emissor é o IdP da Prefeitura ([ADR-0010](docs/adr/0010-contrato-da-api-rest-v1.md)).
 
-- **ADRs** em `docs/adr/`. No mínimo: estratégia e ordem de extração; propriedade dos dados na transição; o que fazer com as regras em PL/SQL; o tratamento dos comportamentos legados encontrados.
-- **`docs/plano-de-migracao.md`**: critérios objetivos para avançar cada operação de `legado` → `sombra` → `novo` → desligamento no monolito, o que monitorar em cada fase e como voltar atrás.
+## Decisões
 
-### 8. Mentoria
+O índice completo, com o status e o mapa entre as decisões, está em [docs/adr/](docs/adr/README.md). O [plano de migração](docs/plano-de-migracao.md) traz os critérios de avanço e retorno de cada fase.
 
-Um colega do time de legado, muito experiente em .NET Framework e Oracle e começando agora em .NET 8, abriu o primeiro PR dele no serviço novo: `revisao/PR-212.md` e `revisao/PR-212.diff`. Escreva sua revisão em `revisao/REVIEW-PR-212.md`, como comentaria no GitHub. Ele vai ler cada comentário, e o objetivo é que ele aprenda, não só que o PR seja corrigido.
-
-## Restrições
-
-- **O legado está em produção.** Mudanças no código ou no banco do legado devem ser mínimas, justificadas em ADR e compatíveis com .NET Framework 4.8 / C# 7.3 e Oracle 19c.
-- Objetos de banco novos ficam em schema próprio. Não altere as tabelas do legado.
-- Nenhuma operação de escrita pode ser executada duas vezes por causa da sua arquitetura.
-
-## O que entregar
-
-Um **fork público** deste repositório, com histórico de commits que mostre a evolução do trabalho e um README explicando: como rodar, como alternar os modos de cada operação e ver o resultado, as decisões principais (com links para os ADRs) e o que você faria com mais tempo.
-
-## O que olhamos
-
-| Critério | Peso |
+| ADR | Decisão |
 | --- | --- |
-| Strangler fig de verdade: roteamento por operação, sombra segura, rollback instantâneo | Alto |
-| Camada anticorrupção: o legado não vaza para o domínio novo, e os ERPs não percebem a troca | Alto |
-| Comportamentos não documentados: encontrados, testados e tratados com decisão explícita | Alto |
-| Decisões de dados e regras em PL/SQL: justificativa, riscos e reversibilidade | Alto |
-| Código .NET 8: arquitetura, async, testes, clareza | Alto |
-| ADRs e plano de migração: um time conseguiria executar a partir deles? | Alto |
-| Observabilidade útil para operar a migração, não só "tem OpenTelemetry" | Médio |
-| Docker, Kubernetes e CI | Médio |
-| Revisão do PR-212: prioridade, didática e tom | Médio |
+| [0001](docs/adr/0001-estrategia-strangler-fig-e-ordem-de-extracao.md) | Strangler fig por operação; ordem `ConsultarNfse` → `ServicoTomado` → `CancelarNfse` |
+| [0002](docs/adr/0002-propriedade-dos-dados-na-transicao.md) | O legado continua dono dos dados; o novo lê o mesmo Oracle por views e usa três usuários com menor privilégio |
+| [0003](docs/adr/0003-regras-de-cancelamento-em-plsql.md) | PL/SQL encapsulado como autoridade (wrapper com lock e snapshot); regra espelhada no domínio para dual-run |
+| [0004](docs/adr/0004-comportamentos-legados-nao-documentados.md) | Catálogo de comportamentos legados: preservar no SOAP, corrigir na REST, decisões de segurança |
+| [0005](docs/adr/0005-correcao-do-trigger-de-recalculo-da-guia.md) | Correção do trigger da guia (**proposta**, depende de aprovação de negócio) |
+| [0006](docs/adr/0006-camada-anticorrupcao.md) | Camada anticorrupção: o domínio não conhece XML, SOAP nem os códigos do legado |
+| [0007](docs/adr/0007-arquitetura-do-servico-novo.md) | .NET 10, clean architecture, CQRS pragmático, Dapper; sem MediatR nem EF |
+| [0008](docs/adr/0008-fachada-yarp-roteamento-e-flags.md) | Fachada YARP north-south, flags e kill switch, sem service mesh |
+| [0009](docs/adr/0009-sombra-escrita-unica-e-idempotencia.md) | Sombra por operação; cancelamento avaliado sem escrita; escrita única; idempotência natural |
+| [0010](docs/adr/0010-contrato-da-api-rest-v1.md) | REST `/api/v1`, cursor keyset, ProblemDetails, JWT, nenhum documento em URL |
+| [0011](docs/adr/0011-paridade-golden-master.md) | Golden master com relógio congelado e banco restaurável |
+| [0012](docs/adr/0012-observabilidade-seguranca-e-lgpd.md) | OpenTelemetry, métricas que decidem fase, dados pessoais fora da telemetria |
 
-Profundidade vale mais do que cobertura. Uma operação extraída com sombra, paridade e rollback bem resolvidos vale mais do que três operações "migradas" sem garantias.
+Pontos que valem a conversa:
 
-## Diferenciais
+- **Por que o PL/SQL continua mandando no cancelamento.** Assim há um só caminho de escrita, o rollback é trocar uma flag sem reconciliar dados, e o trigger da guia continua valendo. O wrapper corrige no caminho novo dois defeitos do legado que o [spike](docs/spikes/2026-10-19-premissas-oracle.md) confirmou: a escrita dupla em cancelamentos concorrentes (K08) e o Fault depois do commit (K09).
+- **O bug da guia (K07) não foi corrigido dentro da migração.** Corrigir no meio tornaria cada divergência ambígua (bug da migração ou efeito da correção?). A correção está pronta e é reversível, mas fica separada, como proposta ([ADR-0005](docs/adr/0005-correcao-do-trigger-de-recalculo-da-guia.md)).
+- **A sombra do cancelamento não escreve.** Ela usa o usuário `NFSE_MODERNO_RO`, que não tem `EXECUTE` no wrapper. A garantia vem do banco, não do código.
+- **Números com origem.** Cada limite e meta nas ADRs diz se veio do enunciado, do código do legado ou se é hipótese a calibrar no M0.
 
-- Lado de consulta com modelo de leitura próprio, alimentado por CDC ou outbox, com a defasagem medida
-- Teste de resiliência: o que acontece com o cliente quando o serviço novo, o legado ou o banco ficam lentos ou caem
-- Teste de carga (k6) comparando legado e novo, com thresholds justificados
-- Deploy em cluster local (kind/k3d) com rollout progressivo
-- Flags com OpenFeature ou similar
+## Estrutura
 
-## FAQ
+```
+src/Nfse.Fachada            proxy YARP: roteamento, flags, kill switch, sombra
+src/Nfse.Dominio            documento, período, competência, política de cancelamento
+src/Nfse.Aplicacao          casos de uso de leitura e de cancelamento, portas
+src/Nfse.Infra.Oracle       views, wrapper e usuário só leitura (Dapper + ODP.NET)
+src/Nfse.Adaptadores.Soap   camada anticorrupção (contrato do legado)
+src/Nfse.Adaptadores.Rest   API /api/v1
+src/Nfse.Host               composição do serviço novo
+db/moderno                  schema NFSE_MODERNO: usuários, views e wrapper
+tests/paridade              golden master: 47 casos capturados do legado
+deploy/                     flags, dashboards do Grafana e manifests Kubernetes (Kustomize)
+docs/                       ADRs, plano de migração, spike de premissas, enunciado
+legado/, db/0*, tools/      monolito original (inalterado)
+```
 
-**Preciso de Windows?**
-Não. O legado compila em `net48` com reference assemblies e roda em `net8.0` em qualquer sistema.
+## O que eu faria com mais tempo
 
-**Preciso extrair as três operações?**
-Esperamos as três. Se precisar priorizar, faça uma bem completa, explique por que escolheu essa e como faria as outras.
-
-**Posso usar outro banco no serviço novo?**
-Pode, desde que a decisão esteja em ADR e o dado continue consistente com o que o legado grava.
-
-**Quanto de máquina preciso?**
-O container Oracle usa cerca de 2–3 GB de RAM. Planeje o resto do compose levando isso em conta.
-
-**Como será a entrevista?**
-Vamos discutir suas decisões e pedir que você altere partes da entrega ao vivo.
-
----
-
-Dúvidas: **selecao.pcrj@gmail.com**
+- **Medir antes de afirmar.** Rodar o M0 do plano (fachada em pass-through em produção) e um teste de carga k6, legado × novo, para trocar as hipóteses **[H]** das ADRs por números medidos: orçamento da fachada, timeouts, amostragem e limites de rollback.
+- **Rodar os testes contra Oracle 19c.** O ambiente local é 23ai, e os códigos de erro já se mostraram diferentes (`ORA-41900` × `ORA-01031`, `ORA-00054` × `ORA-30006`).
+- **Ligar o CI de verdade.** O job que sobe o compose e roda a paridade nunca rodou, porque o repositório não tinha remote durante o desenvolvimento. Faltam também a paridade do cancelamento no CI, com `FIXED_DATE`, e a validação dos manifests com `kubeconform` e um cluster kind com Argo Rollouts.
+- **Trocar o arquivo de flags por OpenFeature + flagd.** O flagd já está no overlay de produção, mas a fachada ainda não o consome ([ADR-0008](docs/adr/0008-fachada-yarp-roteamento-e-flags.md)).
+- **Aplicar a correção do trigger da guia**, depois da aprovação da Fazenda, com o relatório de reconciliação das guias em aberto ([ADR-0005](docs/adr/0005-correcao-do-trigger-de-recalculo-da-guia.md)).
+- **Cobrir o que o seed não exercita:** C13 (competência posterior à emissão) e C15 (colisão CPF × CNPJ) precisam de massa própria.
+- **Testes de resiliência automatizados** com Oracle lento ou fora do ar. Hoje os casos de novo lento e fora do ar são cobertos só nos testes da fachada.
+- **Fase 2 da sombra:** payload cifrado para reprodução exata das divergências e sombra invertida (o novo atende, o legado é comparado).
+- **Revisão do PR-212** ([revisao/](revisao/PR-212.md)): ainda pendente.
