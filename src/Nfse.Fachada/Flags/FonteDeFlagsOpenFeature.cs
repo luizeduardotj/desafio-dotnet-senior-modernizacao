@@ -278,9 +278,20 @@ public sealed class FonteDeFlagsOpenFeature : BackgroundService, IFonteDeFlags
         return true;
     }
 
+    /// <summary>
+    /// Lista JSON de textos ou texto separado por vírgulas (<c>"10000001,10000002"</c>; vazio = lista vazia). O texto
+    /// existe porque o provider flagd in-process (OpenFeature.Contrib.Providers.Flagd 0.4.0 e 0.5.0) devolve
+    /// <c>TYPE_MISMATCH</c> para flag de objeto que contém lista; é o formato usado no flagd.
+    /// </summary>
     private static bool TentarLista(Value v, out string[] itens)
     {
         itens = [];
+        if (v.IsString)
+        {
+            itens = v.AsString!.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return true;
+        }
+
         if (!v.IsList || v.AsList!.Any(item => !item.IsString))
         {
             return false;

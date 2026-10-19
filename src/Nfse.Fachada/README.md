@@ -171,6 +171,7 @@ Com `Flags__Fonte=openfeature`, o mesmo retrato `FlagsDeMigracao` vem de flags O
 
 Como a fonte funciona:
 
+- **Listas como texto no flagd:** `Inclusao` e `Exclusao` vão como texto separado por vírgulas (`"10000001,10000002"`). O provider in-process (`OpenFeature.Contrib.Providers.Flagd` 0.4.0 e 0.5.0) devolve `TYPE_MISMATCH` para flag de objeto que contém lista; a fonte aceita os dois formatos, e o arquivo continua com listas JSON.
 - O provider roda em **modo in-process**: recebe o conjunto de flags pelo stream de sync do flagd (porta 8015, gRPC `flagd.sync.v1`) e avalia na própria fachada. Não há polling nem RPC por requisição. A cada evento do provider (pronto ou configuração alterada), a fonte reavalia as 7 flags fora do caminho da requisição e troca o retrato. `Atual()` só lê o retrato pronto.
 - O resolvedor RPC não é usado: na versão 0.4.0 do provider ele desiste do stream de eventos depois de 3 tentativas, e o retrato ficaria congelado sem erro (um kill switch não chegaria).
 - **Fail-safe idêntico ao do arquivo**: provider ainda sem retrato ou em erro (flagd fora, stream caído), flag ausente ou desabilitada, tipo errado, campo desconhecido no objeto, modo que não é `legado`/`sombra`/`novo`, percentual não inteiro ou fora de 0..100 → `null`. Tudo vai ao legado e `/health/ready` responde 503. O log sai só nas transições. Campo ausente no objeto fica no padrão, como no arquivo.
@@ -232,7 +233,7 @@ curl           -H "X-Admin-Token: $TOKEN" http://fachada:8081/admin/kill-switch 
 
 ## TODO
 
-- [x] **OpenFeature + flagd** (ADR-0008): `FonteDeFlagsOpenFeature`, com o provider flagd in-process (sync por stream), o mesmo retrato `FlagsDeMigracao`, o fail-safe para `null` e `migracao.fonte_flags` no span ([OpenFeature + flagd](#openfeature--flagd)). Falta cronometrar o kill switch pelo flagd (alvo < 10 s) e uma métrica por avaliação de flag (hoje a avaliação aparece no span e no `migracao_modo_info`).
+- [x] **OpenFeature + flagd** (ADR-0008): `FonteDeFlagsOpenFeature`, com o provider flagd in-process (sync por stream), o mesmo retrato `FlagsDeMigracao`, o fail-safe para `null` e `migracao.fonte_flags` no span ([OpenFeature + flagd](#openfeature--flagd)). Validado no compose em 2026-10-19 contra o flagd v0.11.1: mudança de modo aplicada em 1,6 s e kill switch global em 0,4 s **[M]**.
 - [x] **OpenTelemetry** (ADR-0012): tracing, métricas e logs exportados por OTLP, `fachada_overhead`, span filho da chamada ao destino (instrumentação do HttpClient) e os gauges `migracao_modo_info` e `kill_switch_ativo`.
 - [ ] Resultado `erro_negocio` (resposta 200 com `ListaMensagemRetorno`): a sombra já captura o corpo e lê os códigos (`XmlSoap.CodigosDeRetorno`), mas só nas operações em `sombra`.
 - [ ] Pseudonimização (HMAC) de documentos e IMs num processador de logs (ADR-0012). A sombra já pseudonimiza o pedido no registro da divergência; o processador vale como defesa para logs novos.

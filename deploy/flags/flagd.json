@@ -23,8 +23,8 @@
         "legado": {
           "Modo": "legado",
           "Percentual": 0,
-          "Inclusao": [],
-          "Exclusao": [],
+          "Inclusao": "",
+          "Exclusao": "",
           "Sombra": {
             "Amostragem": 0
           }
@@ -46,8 +46,8 @@
         "legado": {
           "Modo": "legado",
           "Percentual": 0,
-          "Inclusao": [],
-          "Exclusao": [],
+          "Inclusao": "",
+          "Exclusao": "",
           "Sombra": {
             "Amostragem": 0
           }
@@ -69,8 +69,8 @@
         "legado": {
           "Modo": "legado",
           "Percentual": 0,
-          "Inclusao": [],
-          "Exclusao": [],
+          "Inclusao": "",
+          "Exclusao": "",
           "Sombra": {
             "Amostragem": 0
           }

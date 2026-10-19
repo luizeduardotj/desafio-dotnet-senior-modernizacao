@@ -28,8 +28,8 @@ spec:
           legado:
             Modo: legado
             Percentual: 0
-            Inclusao: []
-            Exclusao: []
+            Inclusao: ""
+            Exclusao: ""
             Sombra:
               Amostragem: 0
         defaultVariant: legado
@@ -45,8 +45,8 @@ spec:
           legado:
             Modo: legado
             Percentual: 0
-            Inclusao: []
-            Exclusao: []
+            Inclusao: ""
+            Exclusao: ""
             Sombra:
               Amostragem: 0
         defaultVariant: legado
@@ -62,8 +62,8 @@ spec:
           legado:
             Modo: legado
             Percentual: 0
-            Inclusao: []
-            Exclusao: []
+            Inclusao: ""
+            Exclusao: ""
             Sombra:
               Amostragem: 0
         defaultVariant: legado

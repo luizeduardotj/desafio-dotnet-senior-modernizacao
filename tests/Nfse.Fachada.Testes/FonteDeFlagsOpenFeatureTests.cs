@@ -38,6 +38,21 @@ public sealed class FonteDeFlagsOpenFeatureTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Listas_como_texto_separado_por_virgulas_formato_do_flagd()
+    {
+        // O provider flagd in-process recusa flag de objeto com lista (TYPE_MISMATCH); no flagd as listas vão como texto.
+        var flags = Padrao();
+        flags["ConsultarNfse.config"] = Config(Structure.Builder()
+            .Set("Modo", "novo").Set("Inclusao", "10000001, 10000002").Set("Exclusao", "").Build());
+
+        FlagsDaOperacao? consultar = (await LerAsync(new InMemoryProvider(flags)))?.Da("ConsultarNfse");
+
+        Assert.NotNull(consultar);
+        Assert.Equal(["10000001", "10000002"], consultar.Inclusao);
+        Assert.Empty(consultar.Exclusao);
+    }
+
+    [Fact]
     public async Task Le_os_kill_switches_global_e_da_operacao()
     {
         var flags = Padrao();

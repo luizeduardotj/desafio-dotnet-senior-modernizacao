@@ -224,3 +224,4 @@ Toda mudança de fase, degrau, limite ou risco aceito entra aqui por PR, com dat
 | Data | Operação | Mudança | Evidência | Aprovado por |
 | --- | --- | --- | --- | --- |
 | 2026-10-16 | todas | versão inicial do plano, todos os limites **[H]** | — | time de modernização |
+| 2026-10-19 | todas | kill switch nível 1 pelo flagd medido no compose: 0,4 s até 100% no legado; mudança de modo em 1,6 s **[M]** (alvo < 10 s) | `src/Nfse.Fachada/README.md` | time de modernização |
