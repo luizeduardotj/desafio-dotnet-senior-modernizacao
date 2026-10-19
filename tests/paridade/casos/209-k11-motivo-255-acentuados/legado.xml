@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><soap:Fault><faultcode>soap:Server</faultcode><faultstring>Erro interno: ORA-12899: value too large for column &quot;NFSE_OWNER&quot;.&quot;NFSE&quot;.&quot;MOTIVO_CANCELAMENTO&quot; (actual: 510, maximum: 255)
+ORA-06512: at &quot;NFSE_OWNER.PKG_NFSE&quot;, line 87
+ORA-06512: at line 1
+https://docs.oracle.com/error-help/db/ora-12899/</faultstring></soap:Fault></soap:Body></soap:Envelope>
