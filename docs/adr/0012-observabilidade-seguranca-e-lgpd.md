@@ -24,7 +24,7 @@ Os dados trafegados incluem CPF de pessoas físicas (tomadores) e razão social;
 - OpenTelemetry SDK na fachada e no serviço novo; propagação W3C `traceparent`.
 - A fachada cria um span por requisição com `soap.operacao`, `migracao.modo`, `migracao.destino` (`legado`/`novo`), `migracao.motivo_roteamento` (kill switch, lista, percentual, fallback) e um span filho para a chamada ao legado. A latência e os erros do legado são vistos pela fachada; por dentro, o legado é instrumentado só por fora do código (subseção abaixo).
 - A sombra roda em trace **ligado** (span link) ao da requisição original, para não inflar a latência do trace do cliente.
-- No novo: spans de ASP.NET Core e HttpClient. O span do Oracle (instrumentação OpenTelemetry do ODP.NET, com o SQL sem valores de bind) **ainda não está ligado**: hoje o trace do novo termina no span do caso de uso.
+- No novo: spans de ASP.NET Core e HttpClient. Spans do Oracle pela extensão oficial `Oracle.ManagedDataAccess.OpenTelemetry` (fonte `Oracle.ManagedDataAccess.Core`, [TelemetriaDoOracle.cs](../../src/Nfse.Infra.Oracle/TelemetriaDoOracle.cs)): sem texto do SQL, sem binds (o ODP.NET não os captura), sem atributos da conexão e sem a exceção, porque a mensagem de um `ORA-` pode citar valores. Só a chamada da procedure sai em `db.statement`, com placeholders. Conferido no Tempo em 2026-10-19: o span do Oracle é filho do span do novo e não leva CNPJ nem IM **[M]**.
 
 #### Legado instrumentado por fora (opcional)
 
@@ -67,13 +67,12 @@ JSON estruturado, com `trace_id` e `span_id` em todo evento; categoria de log po
 
 `grafana/otel-lgtm` no compose (OpenTelemetry Collector + Tempo + Prometheus + Loki + Grafana em uma imagem), com dashboards provisionados:
 
-Um dashboard, **Migração por operação** ([deploy/grafana](../../deploy/grafana/dashboards/migracao-por-operacao.json)), com três seções:
+Um dashboard, **Migração por operação** ([deploy/grafana](../../deploy/grafana/dashboards/migracao-por-operacao.json)), com quatro seções:
 
 1. **Por operação:** distribuição legado × novo, p99 por destino, taxa de erro, fallback.
 2. **Sombra:** comparações, divergências por classe, descartes.
 3. **Legado:** p99 visto pela fachada × medido dentro do legado.
-
-A seção de cancelamento (dual-run e espera de lock no wrapper) ainda não existe; as métricas já são exportadas.
+4. **Cancelamento:** `cancelamento_regra_divergente_total` do dual-run, o gatilho de rollback do §6.2 do plano. A espera de lock no wrapper ainda não tem painel.
 
 Em Kubernetes, o mesmo OTLP aponta para o backend da plataforma.
 

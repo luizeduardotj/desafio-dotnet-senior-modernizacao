@@ -98,6 +98,6 @@ Nenhum dado é movido. Desfazer = voltar as operações para `legado` e, se nece
 
 ## Como verificar
 
-- Teste de integração (grants): `NFSE_MODERNO_APP` e `NFSE_MODERNO_RO` recebem `ORA-00942` ao tentar `UPDATE NFSE_OWNER.NFSE` (sem privilégio algum na tabela) e `PLS-00201` ao chamar `NFSE_OWNER.PKG_NFSE.gerar_nfse`; `NFSE_MODERNO_RO` recebe `PLS-00201` ao chamar o wrapper; `SELECT ... FOR UPDATE` numa view falha para os dois.
+- Teste de integração (grants), automático desde 2026-10-19 em [GarantiasDoBancoTests.cs](../../tests/Nfse.Paridade.Testes/GarantiasDoBancoTests.cs), no job `compose`: `NFSE_MODERNO_APP` e `NFSE_MODERNO_RO` recebem `ORA-00942` ao tentar `UPDATE NFSE_OWNER.NFSE` (sem privilégio algum na tabela) e `PLS-00201` ao chamar `NFSE_OWNER.PKG_NFSE.gerar_nfse`; `NFSE_MODERNO_RO` recebe `PLS-00201` ao chamar o wrapper; `SELECT ... FOR UPDATE` numa view falha para os dois.
 - Teste de integração: cancelar pelo novo e consultar em seguida pelo novo e pelo legado retorna a nota cancelada nos dois.
 - Métrica de conexões ativas e tempo de espera de pool do `NFSE_MODERNO_APP`.

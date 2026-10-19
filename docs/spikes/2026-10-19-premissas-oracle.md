@@ -4,6 +4,8 @@ Execução das premissas que as ADRs marcavam como "lida no código". Ambiente: 
 
 ## Resultados
 
+Desde 2026-10-19, os grants e o K08 corrigido pelo wrapper também rodam como teste automático no CI ([GarantiasDoBancoTests.cs](../../tests/Nfse.Paridade.Testes/GarantiasDoBancoTests.cs)).
+
 | Premissa | ADR | Resultado | Evidência |
 | --- | --- | --- | --- |
 | Objetos PL/SQL do legado compilam | 0011 (D1) | **confirmada**: `PKG_GUIA`, `PKG_NFSE` e o trigger `VALID` | `USER_OBJECTS` |

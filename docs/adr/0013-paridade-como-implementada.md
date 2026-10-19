@@ -18,6 +18,8 @@ Cada Oracle do compose leva ~2–3 GB e minutos para carregar o seed. Subir um p
 2. paridade do cancelamento com `FIXED_DATE`, num step próprio, que confere a linha de base antes e devolve `FIXED_DATE = NONE` ao sair;
 3. as leituras de novo, para provar que o cancelamento não afetou o que elas comparam.
 
+Antes de tudo, `tests/paridade/recapturar-leituras-legado.sh` recaptura as leituras direto no legado e falha se `git diff` em `tests/paridade/casos` não estiver vazio: o golden master ainda descreve o legado, não só o que o novo reproduz. Entre as leituras e o `FIXED_DATE` entram as garantias do banco: grants dos usuários do `NFSE_MODERNO` e K08 pelo wrapper, numa nota que nenhum caso do corpus usa.
+
 Localmente, a linha de base é o volume `nfse-oracle-baseline` restaurado sobre o volume do compose ([tests/paridade/README.md](../../tests/paridade/README.md)).
 
 ### 2. Corpus em arquivos simples, sem a biblioteca Verify
@@ -26,7 +28,7 @@ Cada caso em `tests/paridade/casos/NNN-.../` tem `operacao`, `entrada.xml`, `leg
 
 ### 3. Contrato REST: snapshot do OpenAPI, não oasdiff
 
-`tests/Nfse.Host.Testes/Contrato/ContratoOpenApiTests.cs` compara o `/openapi/v1.json` gerado com o arquivo versionado `openapi-v1.json` e falha em **qualquer** diferença, quebra ou não. A mudança intencional regenera o arquivo (`NFSE_ATUALIZAR_CONTRATO=1`), e o diff do snapshot entra no PR, onde o revisor decide se quebra a v1. O oasdiff classificaria a quebra sozinho, mas exige ferramenta externa e uma `main` publicada para comparar. Com uma v1 e um time, o snapshot dá a mesma proteção. O contrato SOAP é testado contra a forma dos exemplos de `tools/exemplos` (Categoria `Contrato`).
+`tests/Nfse.Host.Testes/Contrato/ContratoOpenApiTests.cs` compara o `/openapi/v1.json` gerado com o arquivo versionado `openapi-v1.json` e falha em **qualquer** diferença, quebra ou não. A mudança intencional regenera o arquivo (`NFSE_ATUALIZAR_CONTRATO=1`), e o diff do snapshot entra no PR, onde o revisor decide se quebra a v1. O oasdiff classificaria a quebra sozinho, mas exige ferramenta externa e uma `main` publicada para comparar. Com uma v1 e um time, o snapshot dá a mesma proteção. As respostas reais da REST (sucesso e ProblemDetails) são validadas contra esse mesmo snapshot com NJsonSchema; foi essa validação que achou o 401 fora do spec e um `limite` não inteiro que não virava `parametros-invalidos`. O contrato SOAP é testado contra a forma dos exemplos de `tools/exemplos` (Categoria `Contrato`).
 
 ### 4. Pipeline real
 
@@ -34,17 +36,16 @@ Cada caso em `tests/paridade/casos/NNN-.../` tem `operacao`, `entrada.xml`, `leg
 | --- | --- | --- |
 | `legado` | build `net48;net8.0` e testes do legado | — |
 | `moderno` | build com analyzers (warnings como erro), unitários, arquitetura, fachada, host; step próprio para os testes de contrato | — |
-| `compose` | build das imagens, `compose up --wait`, smoke, paridade das leituras e da sombra, paridade do cancelamento com `FIXED_DATE`, leituras de novo | Oracle real do compose |
+| `compose` | build das imagens, `compose up --wait`, smoke, recaptura das leituras pelo legado, paridade das leituras e da sombra com os grants, K08 pelo wrapper, cancelamento com `FIXED_DATE`, leituras de novo | Oracle real do compose |
 | `manifests` | `kubeconform -strict` dos overlays `local` e `producao`, com os CRDs pelo catálogo datreeio | — |
 
 ## O que a ADR-0011 previa e ainda não existe
 
+A validação das respostas REST, a recaptura pelo legado e os testes de grants e de K08 entraram depois da primeira versão desta ADR, no mesmo dia. Falta:
+
 | Previsto na 0011 | Situação |
 | --- | --- |
-| Respostas da REST validadas contra o OpenAPI | só o spec é comparado; a validação das respostas é o próximo passo do contrato |
-| Recaptura do golden master pelo legado no CI | o corpus foi capturado do legado uma vez; o CI compara só o novo |
-| Testes de integração de grants e de concorrência (K08) | conferidos no [spike](../spikes/2026-10-19-premissas-oracle.md), sem teste automático |
-| Snapshot de `NFSE`/`GUIAS` depois de cada cancelamento | não implementado; K07 e K08 confirmados no spike |
+| Snapshot de `NFSE`/`GUIAS` depois de cada cancelamento | não implementado; K08 tem teste automático, K07 só o spike |
 | Teste de guarda contra `DateTime.Now` no serviço novo | não implementado; a regra está no CLAUDE.md e na revisão |
 | "ID do catálogo sem caso falha o build" | não implementado; C13 e C15 não têm caso por falta de massa no seed |
 | Testes de propriedade (período, cursor, documentos) | não implementados; período e cursor têm testes de exemplo nos limites |

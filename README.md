@@ -177,7 +177,7 @@ Números de execução **[M]**, cada um com o lugar onde está o detalhe. O rest
 | Carga (k6 pela fachada, sem fila) | p99 do novo 0,36× (`ConsultarNfse`) e 0,58× (`ServicoTomado`) o do legado; a 20 + 5 req/s o legado satura e o novo não | [tests/carga](tests/carga/README.md) |
 | Kill switch nível 1 | flagd no compose: 0,4 s até 100% no legado; CR `FeatureFlag` no cluster: 0,12–0,24 s nas 3 réplicas. Pelo ConfigMap: ~40 s, por isso ele não é usado em produção | [deploy/k8s](deploy/k8s/README.md#validação) |
 | Canário e rollback (Argo Rollouts em k3d) | canários da fachada e do novo aprovados pela análise; abort manual em 6,3 s; **0 falhas em 8.762 requisições** durante os drills | [deploy/k8s](deploy/k8s/README.md#overlay-de-produção-em-k3d) |
-| CI | build, testes, contrato, `kubeconform` dos dois overlays, compose, paridade das leituras e do cancelamento com `FIXED_DATE` | [.github/workflows/ci.yml](.github/workflows/ci.yml) |
+| CI | build, testes, contrato (spec e respostas REST), `kubeconform` dos dois overlays, compose, golden master recapturado pelo legado, grants e K08 contra o Oracle, paridade das leituras e do cancelamento com `FIXED_DATE` | [.github/workflows/ci.yml](.github/workflows/ci.yml) |
 
 ## Estrutura
 
@@ -207,8 +207,7 @@ legado/, db/0*, tools/      monolito original (código inalterado; só o Dockerf
 - **Cobrir o que o seed não exercita:** C13 (competência posterior à emissão) e C15 (colisão CPF × CNPJ) precisam de massa própria.
 - **Testes de resiliência automatizados** com Oracle lento ou fora do ar. Hoje os casos de novo lento e fora do ar são cobertos só nos testes da fachada.
 - **Fase 2 da sombra:** payload cifrado para reprodução exata das divergências e sombra invertida (o novo atende, o legado é comparado).
-- **Fechar o que a ADR-0011 previa e ficou de fora** ([ADR-0013](docs/adr/0013-paridade-como-implementada.md)): validar as respostas da REST contra o OpenAPI, recapturar o golden master pelo legado no CI, testes automáticos de grants e de concorrência (K08) contra o Oracle e um teste de guarda contra `DateTime.Now`.
-- **Span do Oracle no serviço novo** (ODP.NET no OpenTelemetry, sem SQL com valores) e a seção de cancelamento no dashboard (dual-run e espera de lock).
+- **Fechar o que a ADR-0011 previa e ficou de fora** ([ADR-0013](docs/adr/0013-paridade-como-implementada.md)): snapshot de `NFSE`/`GUIAS` depois de cada cancelamento, um teste de guarda contra `DateTime.Now`, testes de propriedade e o painel de espera de lock no wrapper.
 - **Rollback automático pela fachada.** Hoje os gatilhos do §9 do plano chamam o plantão, que aplica o kill switch; a volta sozinha fica para o M1.
 - **Métrica `soap_cnpj_inconsistente_total`**, que o M0 precisa para decidir C18/K04.
 - **Acompanhar o PR-212** depois da revisão ([revisao/REVIEW-PR-212.md](revisao/REVIEW-PR-212.md)): parear com o autor sobre DI, async e HttpClientFactory.

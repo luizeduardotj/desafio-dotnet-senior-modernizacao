@@ -102,6 +102,6 @@ A REST é aditiva e não afeta os ERPs. Uma versão com problema pode ser retira
 
 ## Como verificar
 
-- Testes de contrato ([ADR-0011](0011-paridade-golden-master.md)): o snapshot do OpenAPI no CI bloqueia qualquer mudança não revisada na v1 ([ADR-0013](0013-paridade-como-implementada.md)); validar as respostas contra o spec é o próximo passo.
+- Testes de contrato ([ADR-0011](0011-paridade-golden-master.md)): o snapshot do OpenAPI no CI bloqueia qualquer mudança não revisada na v1, e as respostas reais (sucesso e ProblemDetails) são validadas contra esse snapshot ([ADR-0013](0013-paridade-como-implementada.md)).
 - Testes de autorização: prestador A não lê nem cancela nota do prestador B (`403`); tomador só lê o próprio documento.
 - Testes: período de 31 dias inclusivo aceito, 32 rejeitado; `dataInicial = dataFinal` devolve as notas do dia.
