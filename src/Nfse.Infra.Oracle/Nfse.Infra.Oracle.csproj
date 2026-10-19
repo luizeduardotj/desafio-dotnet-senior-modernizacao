@@ -3,6 +3,7 @@
   <ItemGroup>
     <PackageReference Include="Dapper" />
     <PackageReference Include="Oracle.ManagedDataAccess.Core" />
+    <PackageReference Include="Oracle.ManagedDataAccess.OpenTelemetry" />
     <PackageReference Include="System.Security.Cryptography.Pkcs" />
   </ItemGroup>
 

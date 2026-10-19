@@ -894,6 +894,134 @@
           "refId": "B"
         }
       ]
+    },
+    {
+      "id": 17,
+      "type": "row",
+      "title": "Cancelamento: dual-run da regra (ADR-0003)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 56,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Divergências da regra no período",
+      "description": "cancelamento_regra_divergente_total: cancelamentos em que a política do domínio discordou do PL/SQL (dual-run, ADR-0003). Vale o PL/SQL; qualquer valor acima de 0 dispara rollback imediato do cancelamento (plano §6.2, §9). Não tem label operacao: o filtro do topo não se aplica.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 57,
+        "w": 6,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(increase(cancelamento_regra_divergente_total[$__range])) or vector(0)",
+          "legendFormat": "__auto"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Divergências da regra por decisão e classe",
+      "description": "decisao_plsql × decisao_dominio, com classe fronteira_relogio (SYSDATE no segundo seguinte ao prazo) ou nao_classificada. Gatilho de rollback do cancelamento (plano §9).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 57,
+        "w": 18,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "stacking": {
+              "mode": "none"
+            },
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (decisao_plsql, decisao_dominio, classe) (increase(cancelamento_regra_divergente_total[$__rate_interval]))",
+          "legendFormat": "{{decisao_plsql}} → {{decisao_dominio}} ({{classe}})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A"
+        }
+      ]
     }
   ]
 }

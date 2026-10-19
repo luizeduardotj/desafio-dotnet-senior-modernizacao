@@ -6,10 +6,12 @@ using Nfse.Aplicacao.Consultas;
 using Nfse.Aplicacao.Portas;
 using Nfse.Infra.Oracle;
 using Nfse.Observabilidade;
+using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AdicionarTelemetriaNfse("nfse-novo", "Nfse.Host");
+builder.Services.ConfigureOpenTelemetryTracerProvider(tracing => tracing.AdicionarTelemetriaDoOracle());
 
 // Duas portas: a pública (SOAP para a fachada, REST para app e portal) e a interna, só para a avaliação da sombra
 // do cancelamento, alcançável apenas pela fachada (NetworkPolicy). Nos testes o TestServer ignora o Kestrel.
