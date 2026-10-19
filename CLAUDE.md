@@ -11,7 +11,7 @@ Desafio técnico de modernização do Nota Carioca (NFS-e do Rio): extrair `Cons
 | `src/` | serviço novo e fachada (.NET 10) | [ADR-0007](docs/adr/0007-arquitetura-do-servico-novo.md), [ADR-0008](docs/adr/0008-fachada-yarp-roteamento-e-flags.md) |
 | `tests/` | testes do código novo e de paridade | [ADR-0011](docs/adr/0011-paridade-golden-master.md) |
 | `tools/` | gerador de lotes e exemplos SOAP do legado | não alterar os exemplos: são evidência de comportamento |
-| `revisao/` | PR-212 a revisar | `REVIEW-PR-212.md` é escrito pelo autor humano |
+| `revisao/` | PR-212 e a revisão dele | `REVIEW-PR-212.md` é só comentário de revisão; o código do PR não é corrigido aqui |
 
 ## Regras de arquitetura (verificadas por teste)
 

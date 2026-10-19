@@ -175,4 +175,4 @@ legado/, db/0*, tools/      monolito original (inalterado)
 - **Cobrir o que o seed não exercita:** C13 (competência posterior à emissão) e C15 (colisão CPF × CNPJ) precisam de massa própria.
 - **Testes de resiliência automatizados** com Oracle lento ou fora do ar. Hoje os casos de novo lento e fora do ar são cobertos só nos testes da fachada.
 - **Fase 2 da sombra:** payload cifrado para reprodução exata das divergências e sombra invertida (o novo atende, o legado é comparado).
-- **Revisão do PR-212** ([revisao/](revisao/PR-212.md)): ainda pendente.
+- **Acompanhar o PR-212** depois da revisão ([revisao/REVIEW-PR-212.md](revisao/REVIEW-PR-212.md)): parear com o autor sobre DI, async e HttpClientFactory.
