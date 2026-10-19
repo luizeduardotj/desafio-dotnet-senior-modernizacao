@@ -93,6 +93,8 @@ services:
       Flags__Flagd__Porta: "8015"
       # Vazio fecha os endpoints administrativos; o valor de desenvolvimento está em .env.example.
       Admin__Token: ${FACHADA_ADMIN_TOKEN:-}
+      # Chave do HMAC que pseudonimiza o pedido no registro da divergência da sombra. Vazia, o registro leva só os hashes.
+      Sombra__ChaveHmac: ${FACHADA_SOMBRA_CHAVE_HMAC:-}
     ports:
       - "127.0.0.1:8080:8080"
       - "127.0.0.1:8081:8081"

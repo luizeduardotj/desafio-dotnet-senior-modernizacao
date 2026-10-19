@@ -38,7 +38,7 @@ configMapGenerator:
     literals:
       - NFSE_AMBIENTE=producao
       # Flags pelo flagd (ADR-0008): provider in-process no stream de sync do Service flagd, fonte = o CR
-      # FeatureFlag nfse-migracao. O ConfigMap fachada-flags continua montado, mas sem efeito aqui (ver README).
+      # FeatureFlag nfse-migracao. O arquivo de flags da base não é montado aqui (fachada-sem-arquivo-de-flags.yaml).
       - Flags__Fonte=openfeature
       - Flags__Flagd__Host=flagd
       - Flags__Flagd__Porta=8015
@@ -74,6 +74,14 @@ patches:
   # Argo Rollouts assume os pods (workloadRef) e escala o Deployment a zero quando a primeira
   # revisão fica saudável. O template continua no Deployment da base: um lugar só para a imagem.
   - path: fachada-sob-rollout.yaml
+  - path: fachada-sem-arquivo-de-flags.yaml
+  # A variável do arquivo de flags da base também sai: sem o arquivo, ela só confundiria quem lê o pod.
+  - target:
+      kind: ConfigMap
+      name: fachada-config
+    patch: |-
+      - op: remove
+        path: /data/Fachada__ArquivoDeFlags
   - path: nfse-novo-sob-rollout.yaml
   # Sob o Argo Rollouts os pods têm rollouts-pod-template-hash, não pod-template-hash (conferido em k3d).
   # Sem a troca o matchLabelKeys da base é ignorado e o espalhamento conta estável + canário juntos.

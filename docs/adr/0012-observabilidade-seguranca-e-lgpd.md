@@ -22,9 +22,9 @@ Os dados trafegados incluem CPF de pessoas físicas (tomadores) e razão social;
 ### Traces
 
 - OpenTelemetry SDK na fachada e no serviço novo; propagação W3C `traceparent`.
-- A fachada cria um span por requisição com `soap.operacao`, `migracao.modo`, `migracao.destino` (`legado`/`novo`), `migracao.motivo_roteamento` (kill switch, lista, percentual, fallback) e um span filho para a chamada ao legado. **O legado não é instrumentado**: sua latência e erros são vistos pela fachada.
+- A fachada cria um span por requisição com `soap.operacao`, `migracao.modo`, `migracao.destino` (`legado`/`novo`), `migracao.motivo_roteamento` (kill switch, lista, percentual, fallback) e um span filho para a chamada ao legado. A latência e os erros do legado são vistos pela fachada; por dentro, o legado é instrumentado só por fora do código (subseção abaixo).
 - A sombra roda em trace **ligado** (span link) ao da requisição original, para não inflar a latência do trace do cliente.
-- No novo: spans de ASP.NET Core, HttpClient e Oracle (instrumentação OpenTelemetry do ODP.NET), com o SQL sem valores de bind.
+- No novo: spans de ASP.NET Core e HttpClient. O span do Oracle (instrumentação OpenTelemetry do ODP.NET, com o SQL sem valores de bind) **ainda não está ligado**: hoje o trace do novo termina no span do caso de uso.
 
 #### Legado instrumentado por fora (opcional)
 
@@ -52,7 +52,7 @@ A decisão acima continua valendo: os critérios de fase usam o que a fachada me
 | `sombra_divergencias_total` | `operacao`, `classe` | critério de avanço |
 | `sombra_descartadas_total`, `sombra_atraso_segundos` | `operacao` | saúde da sombra |
 | `cancelamento_regra_divergente_total` | `codigo_plsql`, `decisao_dominio` | dual-run ([ADR-0003](0003-regras-de-cancelamento-em-plsql.md)) |
-| `soap_cnpj_inconsistente_total` | `operacao` | dado para corrigir C18/K04 no futuro |
+| `soap_cnpj_inconsistente_total` (a implementar) | `operacao` | dado para corrigir C18/K04 no futuro |
 | `sombra_reexecucoes_total` | `operacao`, `resultado` | custo da reexecução de leituras divergentes |
 | `migracao_modo_info` (gauge) | `operacao`, `modo`, `percentual` | estado atual das flags |
 | `kill_switch_ativo` (gauge) | — | alerta imediato |
@@ -67,9 +67,13 @@ JSON estruturado, com `trace_id` e `span_id` em todo evento; categoria de log po
 
 `grafana/otel-lgtm` no compose (OpenTelemetry Collector + Tempo + Prometheus + Loki + Grafana em uma imagem), com dashboards provisionados:
 
-1. **Migração por operação:** modo atual, distribuição legado × novo, p99 por destino, taxa de erro, fallback.
-2. **Sombra:** taxa de divergência por classe, descartes, atraso; link para os logs das divergências.
-3. **Cancelamento:** dual-run, códigos por destino, concorrência (espera de lock no wrapper).
+Um dashboard, **Migração por operação** ([deploy/grafana](../../deploy/grafana/dashboards/migracao-por-operacao.json)), com três seções:
+
+1. **Por operação:** distribuição legado × novo, p99 por destino, taxa de erro, fallback.
+2. **Sombra:** comparações, divergências por classe, descartes.
+3. **Legado:** p99 visto pela fachada × medido dentro do legado.
+
+A seção de cancelamento (dual-run e espera de lock no wrapper) ainda não existe; as métricas já são exportadas.
 
 Em Kubernetes, o mesmo OTLP aponta para o backend da plataforma.
 
@@ -77,7 +81,7 @@ Em Kubernetes, o mesmo OTLP aponta para o backend da plataforma.
 
 Os alertas usam só as classes **automáticas** do [ADR-0009](0009-sombra-escrita-unica-e-idempotencia.md); `bug_novo`/`bug_legado` são resultado de triagem humana e alimentam o plano, não alertas.
 
-Exemplos de alertas que **disparam rollback** (automático para o modo anterior da operação):
+Exemplos de alertas que **pedem rollback imediato**. Hoje o alerta chama o plantão, que aciona o nível 1 do kill switch (medido em 0,12–0,24 s no cluster); a volta automática pela própria fachada está prevista para o M1. Automáticos de verdade hoje são só o fail-safe para `legado` quando as flags não carregam e o abort do canário pela análise do Argo Rollouts:
 
 - `cancelamento_regra_divergente_total` > 0 (dual-run) ou divergência `nao_classificada` > 0 em cancelamento;
 - p99 do novo > 1,2 × p99 do legado por 15 min;

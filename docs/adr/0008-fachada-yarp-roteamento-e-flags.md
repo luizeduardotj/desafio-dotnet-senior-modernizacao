@@ -111,7 +111,7 @@ A fachada é sem estado e sem banco. Rota de contorno documentada: ingress apont
 | Corpo bufferizado até 1 MiB | [H] | maior request real das três operações é de poucos KB (exemplos); conferir a distribuição de tamanho no M0 |
 | Overhead ≤ 5 ms (fora do escopo) e ≤ 10 ms (em escopo) no p99 | [H] | teste de carga legado direto × via fachada |
 | Timeouts 5 s (leituras) e 10 s (cancelamento) | [H] | acima do p99.9 do legado medido no M0; os ERPs não têm timeout conhecido |
-| Kill switch < 10 s até 100% no legado | [H] | drill cronometrado no compose e no kind |
+| Kill switch < 10 s até 100% no legado | [M] | flagd no compose: 0,4 s; CR `FeatureFlag` em k3d: 0,12–0,24 s nas 3 réplicas (2026-10-19, [deploy/k8s](../../deploy/k8s/README.md#overlay-de-produção-em-k3d)); pelo ConfigMap, ~40 s |
 
 ## Alternativas consideradas
 

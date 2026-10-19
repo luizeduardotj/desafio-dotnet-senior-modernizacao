@@ -1,0 +1,23 @@
+# Em produção as flags vêm só do flagd (ADR-0008): o arquivo de flags da base sai, junto com o ConfigMap.
+# Sem ele, um flags.json esquecido no ConfigMap não vira fonte por engano se alguém trocar Flags__Fonte.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fachada
+spec:
+  template:
+    spec:
+      containers:
+        - name: fachada
+          volumeMounts:
+            - mountPath: /etc/nfse/flags
+              $patch: delete
+      volumes:
+        - name: flags
+          $patch: delete
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fachada-flags
+$patch: delete

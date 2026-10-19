@@ -14,7 +14,7 @@ O novo app e o novo portal do contribuinte precisam de uma API moderna. O design
 
 - **Versão no caminho:** `/api/v1/...`.
 - Mudança aditiva (campo novo, endpoint novo) fica na v1. Mudança que quebra cria a v2, com convivência mínima de 6 meses e headers `Deprecation` e `Sunset` na versão antiga.
-- Quebras detectadas no CI comparando o OpenAPI gerado com o publicado (oasdiff).
+- Quebras detectadas no CI comparando o OpenAPI gerado com o snapshot versionado ([ADR-0013](0013-paridade-como-implementada.md); oasdiff fica para quando houver mais de uma versão publicada).
 
 ### Recursos
 
@@ -102,6 +102,6 @@ A REST é aditiva e não afeta os ERPs. Uma versão com problema pode ser retira
 
 ## Como verificar
 
-- Testes de contrato ([ADR-0011](0011-paridade-golden-master.md)): respostas validam contra o OpenAPI publicado; oasdiff no CI bloqueia quebra na v1.
+- Testes de contrato ([ADR-0011](0011-paridade-golden-master.md)): o snapshot do OpenAPI no CI bloqueia qualquer mudança não revisada na v1 ([ADR-0013](0013-paridade-como-implementada.md)); validar as respostas contra o spec é o próximo passo.
 - Testes de autorização: prestador A não lê nem cancela nota do prestador B (`403`); tomador só lê o próprio documento.
 - Testes: período de 31 dias inclusivo aceito, 32 rejeitado; `dataInicial = dataFinal` devolve as notas do dia.

@@ -47,6 +47,6 @@ spec:
     fake:
       data:
         - key: nfse/fachada
-          value: '{"admin-token":"token-admin-k3d-validacao"}'
+          value: '{"admin-token":"token-admin-k3d-validacao","sombra-hmac":"chave-hmac-k3d-validacao"}'
         - key: nfse/oracle
           value: '{"connection-string-app":"User Id=NFSE_MODERNO_APP;Password=moderno_app_dev_123;Data Source=oracle:1521/FREEPDB1;Min Pool Size=2;Max Pool Size=20;Connection Timeout=15","connection-string-ro":"User Id=NFSE_MODERNO_RO;Password=moderno_ro_dev_123;Data Source=oracle:1521/FREEPDB1;Min Pool Size=1;Max Pool Size=10;Connection Timeout=15"}'

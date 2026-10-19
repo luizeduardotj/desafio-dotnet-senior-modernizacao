@@ -83,7 +83,7 @@ O manual de integração é a única documentação, e "o comportamento em produ
 Corrigir exige autenticação no SOAP, que os ERPs não suportam hoje: qualquer correção quebraria milhares de integrações, o oposto do objetivo. Decisão:
 
 - **Aceitar o risco no SOAP durante a migração**, registrado como dívida com dono (responsável pela segurança do Nota Carioca) e revisão a cada fase.
-- **Medir antes de corrigir**: a sombra registra, sem dados pessoais, quantas requisições trazem CNPJ diferente do cadastrado para a IM (`soap_cnpj_inconsistente_total{operacao}`). Esse número decide se uma futura validação de CNPJ é viável sem quebra.
+- **Medir antes de corrigir**: a sombra registra, sem dados pessoais, quantas requisições trazem CNPJ diferente do cadastrado para a IM (`soap_cnpj_inconsistente_total{operacao}`, ainda não implementada: precisa existir antes do M0). Esse número decide se uma futura validação de CNPJ é viável sem quebra.
 - A API REST não herda nenhum desses riscos.
 
 ### Itens corrigidos no SOAP (C15, C20, C28, K08, K09)

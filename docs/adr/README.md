@@ -15,7 +15,7 @@ Não temos dados de produção do Nota Carioca. Para não confundir hipótese co
 | **[E]** | exigido pelo enunciado ou pelo manual de integração | 50 notas por página, 31 dias |
 | **[L]** | comportamento do legado, lido no código | `ROWNUM`, `SUBSTR(...,255)` |
 | **[H]** | hipótese do time; o texto diz onde será calibrada (M0, teste de carga, drill) | orçamento de 10 ms da fachada |
-| **[M]** | medido (no ambiente local, no teste de carga ou em produção), com data e fonte | — ainda nenhum |
+| **[M]** | medido (no ambiente local, no teste de carga ou em produção), com data e fonte | kill switch pelo flagd em 0,12–0,24 s ([0008](0008-fachada-yarp-roteamento-e-flags.md)); k6 em [tests/carga](../../tests/carga/README.md) |
 
 ## Nível de verificação das premissas
 
@@ -35,8 +35,9 @@ As premissas começaram como leitura estática do código e do PL/SQL. O [spike 
 | [0008](0008-fachada-yarp-roteamento-e-flags.md) | Fachada YARP north-south, OpenFeature/flagd, kill switch, sem service mesh | Aceito |
 | [0009](0009-sombra-escrita-unica-e-idempotencia.md) | Sombra assíncrona; cancelamento avaliado sem escrita (usuário só leitura) sobre estado reconstruído; escrita única; idempotência natural | Aceito |
 | [0010](0010-contrato-da-api-rest-v1.md) | REST `/api/v1`, cursor, ProblemDetails, JWT | Aceito |
-| [0011](0011-paridade-golden-master.md) | Golden master com `FIXED_DATE` e containers isolados; contrato via OpenAPI/oasdiff | Aceito |
+| [0011](0011-paridade-golden-master.md) | Golden master com `FIXED_DATE`, corpus por ID do catálogo, comparação em bytes | Aceito; em parte substituída pela 0013 |
 | [0012](0012-observabilidade-seguranca-e-lgpd.md) | OpenTelemetry, métricas que decidem fase, `otel-lgtm`; dados pessoais fora da telemetria | Aceito |
+| [0013](0013-paridade-como-implementada.md) | Paridade como implementada: um Oracle por job com ordem fixa, corpus em arquivos, snapshot do OpenAPI no lugar do oasdiff | Aceito |
 
 ## Mapa das decisões
 
@@ -60,8 +61,8 @@ As premissas começaram como leitura estática do código e do PL/SQL. O [spike 
 | Sombra de leitura com comparação em bytes e reexecução limitada | Payload cifrado para reprodução de divergências (MVP: pseudonimização + seed) |
 | ACL SOAP + REST v1 para `ConsultarNfse` e `ConsultarNfseServicoTomado` | Read model próprio com CDC (ADR-0002) |
 | `CancelarNfse` via wrapper com lock, dual-run e sombra por reconstrução | Correção do trigger (ADR-0005, depende de aprovação) |
-| Golden master por ID do catálogo, contrato OpenAPI + oasdiff, integração com Oracle real | Testes de propriedade além de período e cursor |
-| OpenTelemetry + `otel-lgtm` com os 3 dashboards | Rate limiting no SOAP (após medição) |
+| Golden master por ID do catálogo, snapshot do OpenAPI ([0013](0013-paridade-como-implementada.md)), paridade com Oracle real | Testes de propriedade além de período e cursor |
+| OpenTelemetry + `otel-lgtm` com o dashboard de migração (por operação, sombra e legado) | Rate limiting no SOAP (após medição) |
 | Compose, manifests Kubernetes, CI | Separar REST e SOAP em deployments distintos |
 
 ## Como propor uma nova ADR

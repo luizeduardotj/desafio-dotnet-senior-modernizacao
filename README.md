@@ -9,7 +9,8 @@ Resposta ao [desafio de modernização](docs/desafio.md): tirar `ConsultarNfse`,
 - **O cancelamento continua decidido pelo PL/SQL do legado**, chamado por um wrapper em schema próprio que acrescenta lock e devolve o snapshot. A regra também existe no domínio como função pura e roda em paralelo (dual-run) para medir divergências. Nenhuma tabela do legado foi alterada.
 - **A sombra funciona para leitura e para escrita.** No cancelamento, o novo avalia a decisão **sem escrever**, com um usuário Oracle só de leitura, sobre o estado anterior reconstruído.
 - **Comportamentos não documentados encontrados e testados**, entre eles dois bugs do legado confirmados em execução: a guia que não desconta a nota cancelada (K07) e a escrita dupla em cancelamentos concorrentes (K08). Catálogo completo em [ADR-0004](docs/adr/0004-comportamentos-legados-nao-documentados.md).
-- Cerca de 400 testes: unitários, arquitetura, integração com Oracle real, contrato REST e paridade.
+- Cerca de 450 testes: unitários, arquitetura, contrato REST e SOAP, integração com Oracle real e paridade.
+- **A revisão do PR-212** de um colega vindo do .NET Framework está em [revisao/REVIEW-PR-212.md](revisao/REVIEW-PR-212.md), escrita como comentários de GitHub para ele aprender, não só corrigir.
 
 ```mermaid
 flowchart LR
@@ -27,7 +28,7 @@ flowchart LR
 
 ## Como rodar
 
-Pré-requisitos: Docker com pelo menos 8 GB para a VM (o Oracle usa 2 a 3 GB) e, para os testes, o SDK do .NET 10.
+Pré-requisitos: Docker com pelo menos 8 GB para a VM (o Oracle usa 2 a 3 GB) e, para os testes, o SDK do .NET 10 (os testes do legado com `-f net8.0` também pedem o runtime do .NET 8).
 
 ```bash
 cp .env.example .env                 # senhas e token admin de desenvolvimento
@@ -35,7 +36,7 @@ docker compose up -d --build --wait  # Oracle (com carga e NFSE_MODERNO), legado
 tools/smoke-compose.sh               # health e ConsultarNfse igual pela fachada e direto no legado
 ```
 
-A primeira subida carrega cerca de 2 milhões de notas, o que leva perto de 1 minuto num Mac M-series. `docker compose down -v` derruba tudo e apaga o banco.
+A primeira subida carrega cerca de 2 milhões de notas, o que leva de 1 a alguns minutos, conforme a memória livre (48 s medidos num Mac M-series com folga). `docker compose down -v` derruba tudo e apaga o banco.
 
 | Serviço | Endereço | Observação |
 | --- | --- | --- |
@@ -156,13 +157,27 @@ O índice completo, com o status e o mapa entre as decisões, está em [docs/adr
 | [0010](docs/adr/0010-contrato-da-api-rest-v1.md) | REST `/api/v1`, cursor keyset, ProblemDetails, JWT, nenhum documento em URL |
 | [0011](docs/adr/0011-paridade-golden-master.md) | Golden master com relógio congelado e banco restaurável |
 | [0012](docs/adr/0012-observabilidade-seguranca-e-lgpd.md) | OpenTelemetry, métricas que decidem fase, dados pessoais fora da telemetria |
+| [0013](docs/adr/0013-paridade-como-implementada.md) | Paridade como implementada: um Oracle por job com ordem fixa e snapshot do OpenAPI; o que a 0011 previa e ficou de fora |
 
 Pontos que valem a conversa:
 
 - **Por que o PL/SQL continua mandando no cancelamento.** Assim há um só caminho de escrita, o rollback é trocar uma flag sem reconciliar dados, e o trigger da guia continua valendo. O wrapper corrige no caminho novo dois defeitos do legado que o [spike](docs/spikes/2026-10-19-premissas-oracle.md) confirmou: a escrita dupla em cancelamentos concorrentes (K08) e o Fault depois do commit (K09).
 - **O bug da guia (K07) não foi corrigido dentro da migração.** Corrigir no meio tornaria cada divergência ambígua (bug da migração ou efeito da correção?). A correção está pronta e é reversível, mas fica separada, como proposta ([ADR-0005](docs/adr/0005-correcao-do-trigger-de-recalculo-da-guia.md)).
 - **A sombra do cancelamento não escreve.** Ela usa o usuário `NFSE_MODERNO_RO`, que não tem `EXECUTE` no wrapper. A garantia vem do banco, não do código.
+- **O que só o cluster mostrou.** Com o overlay de produção em k3d, o canário do serviço novo não recebia nenhuma requisição: a fachada mantinha as conexões abertas para sempre e o Service do Kubernetes balanceia por conexão. A correção é uma linha (`PooledConnectionLifetime` de 1 min), mas sem ela o canário por réplicas e o scale-out do HPA não funcionariam em produção.
 - **Números com origem.** Cada limite e meta nas ADRs diz se veio do enunciado, do código do legado ou se é hipótese a calibrar no M0.
+
+## O que foi medido
+
+Números de execução **[M]**, cada um com o lugar onde está o detalhe. O resto dos limites das ADRs continua **[H]** até o M0.
+
+| O quê | Resultado | Onde |
+| --- | --- | --- |
+| Paridade SOAP com o legado | 45 de 47 casos byte a byte; as 2 diferenças são decisões do catálogo | [tests/paridade](tests/paridade/README.md) |
+| Carga (k6 pela fachada, sem fila) | p99 do novo 0,36× (`ConsultarNfse`) e 0,58× (`ServicoTomado`) o do legado; a 20 + 5 req/s o legado satura e o novo não | [tests/carga](tests/carga/README.md) |
+| Kill switch nível 1 | flagd no compose: 0,4 s até 100% no legado; CR `FeatureFlag` no cluster: 0,12–0,24 s nas 3 réplicas. Pelo ConfigMap: ~40 s, por isso ele não é usado em produção | [deploy/k8s](deploy/k8s/README.md#validação) |
+| Canário e rollback (Argo Rollouts em k3d) | canários da fachada e do novo aprovados pela análise; abort manual em 6,3 s; **0 falhas em 8.762 requisições** durante os drills | [deploy/k8s](deploy/k8s/README.md#overlay-de-produção-em-k3d) |
+| CI | build, testes, contrato, `kubeconform` dos dois overlays, compose, paridade das leituras e do cancelamento com `FIXED_DATE` | [.github/workflows/ci.yml](.github/workflows/ci.yml) |
 
 ## Estrutura
 
@@ -179,17 +194,21 @@ tests/paridade              golden master: 47 casos capturados do legado
 tests/carga                 teste de carga k6, legado × novo pela fachada
 deploy/                     flags, dashboards do Grafana e manifests Kubernetes (Kustomize)
 docs/                       ADRs, plano de migração, spike de premissas, enunciado
-legado/, db/0*, tools/      monolito original (inalterado)
+revisao/                    PR-212 e a revisão dele
+legado/, db/0*, tools/      monolito original (código inalterado; só o Dockerfile ganhou a auto-instrumentação)
 ```
 
 ## O que eu faria com mais tempo
 
 - **Medir antes de afirmar.** Rodar o M0 do plano (fachada em pass-through em produção) para trocar as hipóteses **[H]** das ADRs por números de produção: orçamento da fachada, timeouts, amostragem e limites de rollback. O teste k6 local ([tests/carga](tests/carga/README.md)) só mostra que o novo não piora a cauda e aguenta mais carga que o legado no mesmo hardware.
 - **Rodar os testes contra Oracle 19c.** O ambiente local é 23ai, e os códigos de erro já se mostraram diferentes (`ORA-41900` × `ORA-01031`, `ORA-00054` × `ORA-30006`).
-- **Completar o CI.** Feito: o CI roda build, testes (com os de contrato num step próprio), a validação dos manifests com `kubeconform` (job `manifests`), o compose e a paridade completa: leituras, sombra do cancelamento e, num step próprio depois delas, o cancelamento com `FIXED_DATE` ([tests/paridade](tests/paridade/README.md#no-ci)). Os dois overlays já foram aplicados e testados em k3d ([deploy/k8s](deploy/k8s/README.md#validação)). O de produção subiu com Argo Rollouts, flagd, External Secrets (cofre fake) e ingress-nginx. Canários da fachada e do serviço novo passaram pela análise contra o Prometheus. O rollback, automático e manual, tirou o canário em ~6 s, com 0 falhas em 8.762 requisições. Falta aplicar os manifests num cluster com o CNI de produção.
-- **Tirar o ConfigMap de flags do overlay de produção.** O kill switch pelo flagd já foi medido no compose (0,4 s até 100% no legado) e no cluster, pelo CR `FeatureFlag` (0,12–0,24 s nas 3 réplicas) **[M]**; o arquivo de flags ainda está montado e pode sair do overlay.
+- **Repetir os drills de rollout com o CNI de produção.** Em k3d, o kube-router do k3s rejeitou 2 de 662 requisições no rollout com NetworkPolicy; o mesmo teste sem política deu 0. Falta repetir com Cilium ou Calico e vários nós (espalhamento por zona).
 - **Aplicar a correção do trigger da guia**, depois da aprovação da Fazenda, com o relatório de reconciliação das guias em aberto ([ADR-0005](docs/adr/0005-correcao-do-trigger-de-recalculo-da-guia.md)).
 - **Cobrir o que o seed não exercita:** C13 (competência posterior à emissão) e C15 (colisão CPF × CNPJ) precisam de massa própria.
 - **Testes de resiliência automatizados** com Oracle lento ou fora do ar. Hoje os casos de novo lento e fora do ar são cobertos só nos testes da fachada.
 - **Fase 2 da sombra:** payload cifrado para reprodução exata das divergências e sombra invertida (o novo atende, o legado é comparado).
+- **Fechar o que a ADR-0011 previa e ficou de fora** ([ADR-0013](docs/adr/0013-paridade-como-implementada.md)): validar as respostas da REST contra o OpenAPI, recapturar o golden master pelo legado no CI, testes automáticos de grants e de concorrência (K08) contra o Oracle e um teste de guarda contra `DateTime.Now`.
+- **Span do Oracle no serviço novo** (ODP.NET no OpenTelemetry, sem SQL com valores) e a seção de cancelamento no dashboard (dual-run e espera de lock).
+- **Rollback automático pela fachada.** Hoje os gatilhos do §9 do plano chamam o plantão, que aplica o kill switch; a volta sozinha fica para o M1.
+- **Métrica `soap_cnpj_inconsistente_total`**, que o M0 precisa para decidir C18/K04.
 - **Acompanhar o PR-212** depois da revisão ([revisao/REVIEW-PR-212.md](revisao/REVIEW-PR-212.md)): parear com o autor sobre DI, async e HttpClientFactory.

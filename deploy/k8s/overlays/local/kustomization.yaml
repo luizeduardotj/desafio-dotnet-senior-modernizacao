@@ -24,6 +24,7 @@ secretGenerator:
   - name: fachada-admin
     literals:
       - token=token-admin-local-dev
+      - sombra-hmac=chave-hmac-local-dev
   - name: nfse-novo-oracle
     literals:
       # As senhas são as passadas a db/moderno/01_usuarios.sql (&senha_app, &senha_ro) no ambiente local.

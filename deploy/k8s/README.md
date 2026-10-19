@@ -45,7 +45,7 @@ O Ingress SOAP tem `proxy-body-size: 0` (o legado não limita o corpo e a fachad
 | Admin | Service headless `fachada-admin`, só a porta 8081, `publishNotReadyAddresses` | o comando vale por réplica; uma réplica fora do Service de dados ainda recebe o kill switch |
 | NetworkPolicy | 8080 só do `ingress-nginx`; 8081 só do namespace `nfse-operacao` | |
 | Segredo | `Admin__Token` do Secret `fachada-admin` | local: `secretGenerator`; produção: `ExternalSecret` |
-| Telemetria | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` | lidas pelo SDK OpenTelemetry quando ele for ligado (TODO da fachada) |
+| Telemetria | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` | lidas pelo SDK OpenTelemetry da fachada |
 
 `TZ` não é definido de propósito: a ADR-0012 fixa `America/Sao_Paulo` no código, e o fuso do pod nunca é usado.
 
@@ -76,7 +76,7 @@ No overlay **local**, a fachada lê **um arquivo** de flags (`FonteDeFlagsPorCon
 A fachada de produção consome o flagd (`Flags__Fonte=openfeature` no `fachada-config` do overlay): `FonteDeFlagsOpenFeature` com o provider flagd em **modo in-process**, no stream de sync do Service `flagd:8015`, com seletor `nfse/nfse-migracao` (o flagd registra a fonte Kubernetes como `<namespace>/<nome>`, sem o prefixo `core.openfeature.dev/` do `--uri`). A avaliação roda na própria fachada (sem RPC por requisição, cabe no orçamento de ≤ 10 ms) e cada mudança do CR chega pelo stream, em segundos. O mapeamento do CR para `FlagsDeMigracao` e o fail-safe estão no [README da fachada](../../src/Nfse.Fachada/README.md#openfeature--flagd).
 
 - **flagd fora ou stream caído:** o provider emite erro e a fachada passa a mandar tudo ao legado, com `/health/ready` 503 (fail-safe da ADR-0008), até o sync voltar (o provider tenta de novo com backoff de até 60 s). Ver o risco de readiness abaixo.
-- O ConfigMap `fachada-flags` continua montado também em produção, mas **sem efeito** enquanto a fonte for `openfeature`. O drill do nível 1 já foi medido no cluster (0,12–0,24 s, ver [Validação](#validação)); falta tirar o ConfigMap do overlay.
+- Em produção o ConfigMap `fachada-flags` **não existe**: [`fachada-sem-arquivo-de-flags.yaml`](overlays/producao/fachada-sem-arquivo-de-flags.yaml) tira o ConfigMap, o volume e a variável `Fachada__ArquivoDeFlags`. Assim um `flags.json` esquecido não vira fonte por engano se alguém trocar `Flags__Fonte`. O drill do nível 1 foi medido no cluster pelo CR (0,12–0,24 s, ver [Validação](#validação)).
 
 ### Mapeamento para os níveis do plano (seção 8)
 
@@ -174,7 +174,7 @@ As duas falhas vêm do controlador de NetworkPolicy do k3s (kube-router): ele li
 | Overlay | Recursos | Válidos | Inválidos | Ignorados |
 | --- | --- | --- | --- | --- |
 | `local` | 22 | 22 | 0 | 0 |
-| `producao` | 34 | 34 | 0 | 0 |
+| `producao` | 33 | 33 | 0 | 0 |
 
 ```bash
 CAT='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
@@ -202,7 +202,7 @@ As imagens precisam da tag que o overlay espera (`registry.substituir.invalid/nf
 
 | Cenário | Resultado |
 | --- | --- |
-| `apply` do zero (com as correções abaixo) | 34 objetos; ExternalSecrets `SecretSynced` pelo cofre fake; Pod Security `restricted` aceitou fachada, nfse-novo e flagd; os dois `Rollout` `Healthy` em 5 s. O `nfse-novo` nasce com 1 réplica (o Rollout não declara `replicas`) e o HPA leva a 3 |
+| `apply` do zero (com as correções abaixo) | 34 objetos na época (33 depois que o ConfigMap de flags saiu de produção); ExternalSecrets `SecretSynced` pelo cofre fake; Pod Security `restricted` aceitou fachada, nfse-novo e flagd; os dois `Rollout` `Healthy` em 5 s. O `nfse-novo` nasce com 1 réplica (o Rollout não declara `replicas`) e o HPA leva a 3 |
 | Kill switch nível 1 (`patch` do `defaultVariant` de `migracao.kill-switch` no CR), 5 trocas sob 30 req/s | todas as 3 réplicas no novo estado em **0,12–0,24 s** depois do patch; a última requisição no estado antigo saiu em ≤ 0,07 s; 0 erros. Referência no compose: 0,4 s |
 | Canário da fachada 0.1.0 → 0.1.1 | canário com 1/3 do tráfego (34%); análise aprovou duas vezes (5xx: diferença 0; p99: 0,94× e 1,00×); promovido por 34% → 67% → 100% |
 | Canário do `nfse-novo` 0.1.0 → 0.1.1 (mesmo binário) | 25% (1 canário + 3 estáveis) → 50% (2 + 3) → pausa manual → 100%; análise aprovou (5xx: diferença 0; p99: 1,03× e 1,09×) |

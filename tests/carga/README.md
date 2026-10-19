@@ -43,7 +43,7 @@ Compose local: Docker Desktop com 8 CPUs e 8 GB, Oracle 23ai Free, todos os serv
 | ConsultarNfseServicoTomado | p95 | 369,4 | 300,3 | 0,81 |
 | ConsultarNfseServicoTomado | p99 | 546,9 | 315,3 | 0,58 |
 
-152 requisições por alvo, 0% de falha, 100% dos checks.
+152 requisições por alvo, 0% de falha, 100% dos checks. Com 120 requisições de `ConsultarNfse`, o p99 é praticamente o segundo maior valor: serve para comparar os dois alvos, não como estimativa da cauda.
 
 **Taxa do padrão** (20 + 5 req/s):
 
@@ -59,5 +59,5 @@ O legado satura nessa taxa: o k6 descartou 151 iterações por falta de VUs (1 3
 ## Como ler
 
 - **Sem fila, a latência é a mesma.** As medianas ficam a 3% uma da outra: as duas implementações gastam o tempo na mesma query. O ganho do novo está na cauda, no p95 e no p99.
-- **Na taxa alta, a medida é de capacidade, não de latência.** A razão 0,00 não quer dizer que o novo é 500 vezes mais rápido. Quer dizer que o legado, um processo com o pool e as threads do ASP.NET clássico, enfileira antes de chegar ao Oracle. Por isso o critério do §6.1 compara o novo com o legado **medido no M0 em produção**, com o tráfego real, e não com este número.
+- **Na taxa alta, a medida é de capacidade, não de latência.** A razão de ~0,005 (2,7 ms contra 1 987,6 ms na mediana) não quer dizer que o novo é 500 vezes mais rápido. Quer dizer que o legado, um processo com o pool e as threads do ASP.NET clássico, enfileira antes de chegar ao Oracle. Por isso o critério do §6.1 compara o novo com o legado **medido no M0 em produção**, com o tráfego real, e não com este número.
 - **O que este teste não prova:** carga sobre o lote (premissa 0002 P6, que precisa de homologação com o volume do M0), Oracle 19c com o hardware de produção e o custo da sombra ligada. O overhead da fachada fica no histograma `fachada_overhead_seconds`, fora do k6.

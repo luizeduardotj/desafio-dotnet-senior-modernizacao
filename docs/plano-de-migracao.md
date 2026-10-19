@@ -54,7 +54,7 @@ A fachada entra na frente do `/NfseWS.asmx` com **todas as operações em `legad
 | Tamanho do corpo (p99, máximo) | validar o limite de 1 MiB | [ADR-0008](adr/0008-fachada-yarp-roteamento-e-flags.md) |
 | Overhead da fachada (span fachada − span legado) | validar o orçamento de 5/10 ms | [ADR-0008](adr/0008-fachada-yarp-roteamento-e-flags.md) |
 | Requisições sem chave extraível | quantas ficariam presas no legado | [ADR-0008](adr/0008-fachada-yarp-roteamento-e-flags.md) |
-| `soap_cnpj_inconsistente_total` | base para decidir C18/K04 | [ADR-0004](adr/0004-comportamentos-legados-nao-documentados.md) |
+| `soap_cnpj_inconsistente_total` (**a implementar** na sombra antes do M0) | base para decidir C18/K04 | [ADR-0004](adr/0004-comportamentos-legados-nao-documentados.md) |
 | Concentração por prestador (top 1%) | escolher prestadores piloto e evitar que um prestador domine a amostra | §5.2, §6 |
 
 ### Premissas a confirmar no M0
@@ -163,7 +163,7 @@ O novo responde para uma fatia. Degraus **[H]**: **prestadores piloto** (lista d
 
 ### 6.2 Específico do cancelamento
 
-- `cancelamento_regra_divergente_total` (dual-run) **= 0** em cada degrau. Qualquer valor > 0 dispara rollback automático (§9).
+- `cancelamento_regra_divergente_total` (dual-run) **= 0** em cada degrau. Qualquer valor > 0 dispara rollback imediato (§9).
 - Espera de lock no wrapper: p99 < 1 s **[H]**; estouro do `WAIT 5` = 0.
 - Contagem de `UPDATE` por requisição de cancelamento = 1 (via `DT_CANCELAMENTO` inalterado em reenvio).
 - Verificação diária por amostragem: para 50 notas canceladas pelo novo, o estado em `NFSE` e `GUIAS` é igual ao que o legado teria produzido (inclusive o K07 enquanto o ADR-0005 não for aplicado).
@@ -196,7 +196,9 @@ O novo responde para uma fatia. Degraus **[H]**: **prestadores piloto** (lista d
 
 ## 9. Rollback
 
-### Gatilhos automáticos (a fachada volta a operação ao modo anterior sem intervenção)
+### Gatilhos de rollback imediato (sem decisão humana)
+
+Hoje o alerta chama o plantão, que aplica o nível 1 do kill switch sem precisar decidir nada: o gatilho já é a decisão. A volta automática pela própria fachada fica para o M1. Já são automáticos o fail-safe da última linha e o abort do canário de versão pela análise do Argo Rollouts.
 
 | Gatilho | Fase |
 | --- | --- |
@@ -226,3 +228,4 @@ Toda mudança de fase, degrau, limite ou risco aceito entra aqui por PR, com dat
 | 2026-10-16 | todas | versão inicial do plano, todos os limites **[H]** | — | time de modernização |
 | 2026-10-19 | todas | kill switch nível 1 pelo flagd medido no compose: 0,4 s até 100% no legado; mudança de modo em 1,6 s **[M]** (alvo < 10 s) | `src/Nfse.Fachada/README.md` | time de modernização |
 | 2026-10-19 | leituras | k6 no compose local, legado × novo pela fachada: sem fila, p99 do novo 0,36× (ConsultarNfse) e 0,58× (ServicoTomado) o do legado; a 20 + 5 req/s o legado satura e o novo não **[M]**. Não substitui a medida do M0 em produção | `tests/carga/README.md` | time de modernização |
+| 2026-10-19 | todas | overlay de produção em k3d: kill switch nível 1 pelo CR `FeatureFlag` em 0,12–0,24 s nas 3 réplicas; abort do canário (nível 4) em 6,3 s; 0 falhas em 8.762 requisições nos drills **[M]** | `deploy/k8s/README.md` | time de modernização |

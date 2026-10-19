@@ -1,6 +1,6 @@
 # ADR-0011 — Paridade: golden master, contrato e pipeline de testes
 
-- **Status:** Aceito
+- **Status:** Aceito; **em parte substituída pela [ADR-0013](0013-paridade-como-implementada.md)** (isolamento por alvo, Verify, oasdiff e pipeline)
 - **Data:** 2026-10-16
 - **Relacionados:** [0003](0003-regras-de-cancelamento-em-plsql.md), [0004](0004-comportamentos-legados-nao-documentados.md), [0006](0006-camada-anticorrupcao.md), [0009](0009-sombra-escrita-unica-e-idempotencia.md), [0010](0010-contrato-da-api-rest-v1.md)
 

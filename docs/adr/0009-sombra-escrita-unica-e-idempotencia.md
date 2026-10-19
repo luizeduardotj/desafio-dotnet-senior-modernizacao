@@ -24,7 +24,7 @@ Restrição global: **nenhuma escrita executada duas vezes por causa da arquitet
 - A fachada responde ao cliente com a resposta do legado **assim que ela chega**; a sombra nunca está no caminho da resposta.
 - A requisição (já bufferizada), a resposta do legado e `T0` (instante de recebimento) vão para um **canal em memória limitado** (`System.Threading.Channels`). Canal cheio → descarta e incrementa `sombra_descartadas_total`. Nunca bloqueia.
 - Workers com pool e limites próprios chamam o serviço novo com timeout próprio.
-- **Amostragem** por operação (flag `sombra.amostragem`, semântica em [ADR-0008](0008-fachada-yarp-roteamento-e-flags.md)), começando baixa (ex.: 5%) para não dobrar a carga no Oracle. A decisão de amostrar é tomada **depois** da resposta do legado: respostas em chave rara (`E050`, `E051`, `E053`, `E001`, `E030`, janela do prazo) vão sempre para a sombra, fora da rampa ([plano de migração](../plano-de-migracao.md), §5.4).
+- **Amostragem** por operação (flag `sombra.amostragem`, semântica em [ADR-0008](0008-fachada-yarp-roteamento-e-flags.md)), começando em 1% (degraus do [plano](../plano-de-migracao.md), §5) para não dobrar a carga no Oracle. A decisão de amostrar é tomada **depois** da resposta do legado: respostas em chave rara (`E050`, `E051`, `E053`, `E001`, `E030`, janela do prazo) vão sempre para a sombra, fora da rampa ([plano de migração](../plano-de-migracao.md), §5.4).
 - Falha ou timeout do novo na sombra é registrado como `erro_novo` e nunca afeta o cliente.
 - No serviço novo, toda avaliação de sombra usa o pool `NFSE_MODERNO_RO`, que **não tem privilégio de escrita nem de execução do wrapper** ([ADR-0002](0002-propriedade-dos-dados-na-transicao.md)). A garantia de "sombra não escreve" é do banco.
 
@@ -116,7 +116,7 @@ O registro (log estruturado + métrica, nunca no Oracle) contém:
 
 | Valor | Origem | Onde calibrar |
 | --- | --- | --- |
-| Amostragem inicial de 5% | [H] | carga extra no Oracle medida no teste de carga; sobe por degraus no plano |
+| Amostragem inicial de 1% | [H] | carga extra no Oracle medida no teste de carga; sobe por degraus no plano |
 | Reexecução de leitura divergente limitada a 1 por segundo | [H] | custo do full scan de `ServicoTomado` medido no teste de carga |
 | Janela de 2 s na reconstrução do cancelamento | [H] | skew fachada × banco medido; precisão de `DATE` |
 | Retenção de 15 dias do payload cifrado (fase 2) | [H] | tempo de triagem de uma divergência; validar com o encarregado de dados |

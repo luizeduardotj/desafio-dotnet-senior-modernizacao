@@ -67,6 +67,12 @@ spec:
                 secretKeyRef:
                   name: fachada-admin
                   key: token
+            # Pseudonimização do registro da divergência da sombra (ADR-0012).
+            - name: Sombra__ChaveHmac
+              valueFrom:
+                secretKeyRef:
+                  name: fachada-admin
+                  key: sombra-hmac
             - name: POD_NAME
               valueFrom:
                 fieldRef:
