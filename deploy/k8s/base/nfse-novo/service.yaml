@@ -1,0 +1,13 @@
+# SOAP (/NfseWS.asmx, chamado pela fachada) e REST (/api/v1, chamado pelo ingress) na mesma porta.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nfse-novo
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: nfse-novo
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

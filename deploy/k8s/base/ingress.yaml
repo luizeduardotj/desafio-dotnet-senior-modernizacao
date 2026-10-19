@@ -1,0 +1,49 @@
+# North-south (ADR-0008, topologia):
+#   ERP -> SOAP: ingress -> fachada -> legado ou novo (inclusive ?wsdl e caminhos fora do escopo,
+#                que a fachada repassa ao legado sem alteração)
+#   app/portal -> REST /api/v1: ingress -> nfse-novo direto (não há legado a estrangular)
+# Os dois ficam em objetos separados para o break-glass (nível 3) trocar só o backend SOAP.
+# O host é sobrescrito em cada overlay.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nfse-soap
+  annotations:
+    # O legado não limita o corpo (Program.cs:20); o ingress também não pode (padrão do nginx: 1 MiB).
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    # Acima do Legado__Timeout da fachada (1 min 40 s), para quem corta ser a fachada, com o Fault do legado.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    # Sem retry no ingress: um CancelarNfse reenviado a outra réplica poderia escrever duas vezes.
+    nginx.ingress.kubernetes.io/proxy-next-upstream: "off"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: nfse.substituir-no-overlay.invalid
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fachada
+                port:
+                  number: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nfse-rest
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: nfse.substituir-no-overlay.invalid
+      http:
+        paths:
+          - path: /api/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: nfse-novo
+                port:
+                  number: 8080

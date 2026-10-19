@@ -1,0 +1,7 @@
+# Ver fachada-sob-rollout.yaml. Sem replicas o Deployment nasceria com 1 pod fora do Rollout.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nfse-novo
+spec:
+  replicas: 0

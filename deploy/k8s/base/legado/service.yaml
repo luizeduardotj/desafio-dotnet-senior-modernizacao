@@ -1,0 +1,29 @@
+# Legado (/NfseWS.asmx do NotaCarioca.WebServices), fora do cluster.
+apiVersion: v1
+kind: Service
+metadata:
+  name: legado
+  labels:
+    app.kubernetes.io/name: legado
+spec:
+  type: ExternalName
+  externalName: legado.substituir-no-overlay.invalid
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# Oracle do legado, também fora do cluster. O serviço novo usa este nome na connection string.
+apiVersion: v1
+kind: Service
+metadata:
+  name: oracle
+  labels:
+    app.kubernetes.io/name: oracle
+spec:
+  type: ExternalName
+  externalName: oracle.substituir-no-overlay.invalid
+  ports:
+    - name: oracle
+      port: 1521
+      targetPort: 1521

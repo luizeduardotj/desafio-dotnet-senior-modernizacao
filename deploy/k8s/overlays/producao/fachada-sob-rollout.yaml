@@ -1,0 +1,9 @@
+# Com workloadRef, o Rollout lê o template do Deployment e cuida dos pods. O Deployment fica em
+# zero para que um `kubectl apply` nunca o reescale e crie pods fora do controle do Rollout.
+# Migração de um cluster que já roda os Deployments: ver deploy/k8s/README.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fachada
+spec:
+  replicas: 0

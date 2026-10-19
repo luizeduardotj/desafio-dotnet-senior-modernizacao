@@ -1,0 +1,27 @@
+# flagd servindo o CRD FeatureFlag por watch (ADR-0008, alvo do nível 1 do kill switch).
+# ATENÇÃO: a fachada AINDA NÃO consome o flagd. Ela lê o arquivo do ConfigMap fachada-flags até o
+# IFonteDeFlags sobre OpenFeature existir (src/Nfse.Fachada/README.md, TODO). Ver deploy/k8s/README.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: flagd
+      app.kubernetes.io/component: flags
+    # Seletores escritos à mão nos manifests: includeSelectors reescreveria também os podSelector
+    # das NetworkPolicies (ex.: o "from: fachada" do nfse-novo viraria "from: nfse-novo").
+    includeSelectors: false
+    includeTemplates: true
+
+resources:
+  - featureflag.yaml
+  - rbac.yaml
+  - deployment.yaml
+  - service.yaml
+  - pdb.yaml
+  - networkpolicy.yaml
+
+images:
+  - name: flagd
+    newName: ghcr.io/open-feature/flagd
+    newTag: v0.11.1

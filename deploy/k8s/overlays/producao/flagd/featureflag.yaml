@@ -1,0 +1,69 @@
+# Mesmo conteúdo da seção Migracao de base/fachada/flags.json (M0: tudo em legado), no formato
+# do flagd. Os kill switches são booleanos à parte para o nível 1 ser uma troca de defaultVariant:
+#   kubectl -n nfse patch featureflag nfse-migracao --type=json \
+#     -p '[{"op":"replace","path":"/spec/flagSpec/flags/migracao.kill-switch/defaultVariant","value":"ligado"}]'
+# Ligar qualquer modo continua exigindo PR revisado (plano, seção 8); desligar não.
+apiVersion: core.openfeature.dev/v1beta1
+kind: FeatureFlag
+metadata:
+  name: nfse-migracao
+spec:
+  flagSpec:
+    flags:
+      migracao.kill-switch:
+        state: ENABLED
+        variants:
+          ligado: true
+          desligado: false
+        defaultVariant: desligado
+      ConsultarNfse.kill-switch:
+        state: ENABLED
+        variants:
+          ligado: true
+          desligado: false
+        defaultVariant: desligado
+      ConsultarNfse.config:
+        state: ENABLED
+        variants:
+          legado:
+            Modo: legado
+            Percentual: 0
+            Inclusao: []
+            Exclusao: []
+            Sombra:
+              Amostragem: 0
+        defaultVariant: legado
+      ConsultarNfseServicoTomado.kill-switch:
+        state: ENABLED
+        variants:
+          ligado: true
+          desligado: false
+        defaultVariant: desligado
+      ConsultarNfseServicoTomado.config:
+        state: ENABLED
+        variants:
+          legado:
+            Modo: legado
+            Percentual: 0
+            Inclusao: []
+            Exclusao: []
+            Sombra:
+              Amostragem: 0
+        defaultVariant: legado
+      CancelarNfse.kill-switch:
+        state: ENABLED
+        variants:
+          ligado: true
+          desligado: false
+        defaultVariant: desligado
+      CancelarNfse.config:
+        state: ENABLED
+        variants:
+          legado:
+            Modo: legado
+            Percentual: 0
+            Inclusao: []
+            Exclusao: []
+            Sombra:
+              Amostragem: 0
+        defaultVariant: legado

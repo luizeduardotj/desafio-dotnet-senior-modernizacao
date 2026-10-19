@@ -1,0 +1,7 @@
+# O monolito continua fora do cluster (ADR-0001). Estes Services só dão um nome estável
+# para a fachada (Legado__Url) e para a rota break-glass; cada overlay aponta o externalName.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - service.yaml

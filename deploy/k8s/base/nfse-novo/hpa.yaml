@@ -1,0 +1,29 @@
+# Escala por CPU. O teto não é só custo: cada réplica abre um pool no Oracle do legado.
+# maxReplicas x Max Pool Size (na connection string) precisa caber no orçamento de sessões
+# combinado com o DBA. Ex.: 6 x 20 = 120 sessões. [H]
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nfse-novo
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nfse-novo
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      # Evita derrubar e reabrir pools no Oracle a cada oscilação.
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60

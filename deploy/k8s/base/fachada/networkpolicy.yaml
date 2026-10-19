@@ -1,0 +1,29 @@
+# Entrada da fachada:
+#  - 8080 (dados) só a partir do ingress controller;
+#  - 8081 (admin) só a partir do namespace de operação (plantão / script do nível 2).
+# Saída não é restringida aqui: legado e Oracle estão fora do cluster e os IPs são da plataforma.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fachada
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: fachada
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - port: 8080
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: nfse-operacao
+      ports:
+        - port: 8081
+          protocol: TCP

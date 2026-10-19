@@ -1,0 +1,90 @@
+# Rollout das VERSÕES da fachada e do serviço novo (nível 4 do kill switch quando dá errado).
+# Não é o strangler: quem escolhe legado x novo por operação são as flags da fachada (ADR-0008,
+# "Argo Rollouts ... como mecanismo do strangler. Rejeitada").
+#
+# Sem trafficRouting: o peso é aproximado pela proporção de réplicas (1 de 3 = 34%).
+# A análise compara canário x estável na mesma janela, como o plano faz com novo x legado (§6.1).
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: fachada
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fachada
+  workloadRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fachada
+    scaleDown: onsuccess
+  strategy:
+    canary:
+      maxUnavailable: 0
+      maxSurge: 1
+      analysis:
+        # Em segundo plano desde o primeiro degrau; uma falha aborta e volta à versão estável.
+        templates:
+          - templateName: erro-canario-vs-estavel
+          - templateName: latencia-canario-vs-estavel
+        startingStep: 1
+        args:
+          - name: servico
+            value: nfse-fachada
+          - name: hash-canario
+            valueFrom:
+              podTemplateHashValue: Latest
+          - name: hash-estavel
+            valueFrom:
+              podTemplateHashValue: Stable
+      steps:
+        - setWeight: 34
+        - pause:
+            duration: 15m
+        - setWeight: 67
+        - pause:
+            duration: 15m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: nfse-novo
+spec:
+  # Sem "replicas": o HPA escala este Rollout.
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nfse-novo
+  workloadRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nfse-novo
+    scaleDown: onsuccess
+  strategy:
+    canary:
+      maxUnavailable: 0
+      maxSurge: 1
+      analysis:
+        templates:
+          - templateName: erro-canario-vs-estavel
+          - templateName: latencia-canario-vs-estavel
+        startingStep: 1
+        args:
+          - name: servico
+            value: nfse-novo
+          - name: hash-canario
+            valueFrom:
+              podTemplateHashValue: Latest
+          - name: hash-estavel
+            valueFrom:
+              podTemplateHashValue: Stable
+      steps:
+        - setWeight: 25
+        - pause:
+            duration: 15m
+        - setWeight: 50
+        - pause:
+            duration: 15m
+        # O cancelamento escreve; antes de 100% alguém olha o dual-run (plano §6.2) e promove.
+        - pause: {}

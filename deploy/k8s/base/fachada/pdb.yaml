@@ -1,0 +1,11 @@
+# Drenagem de nó leva no máximo uma réplica por vez.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: fachada
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fachada
+  unhealthyPodEvictionPolicy: AlwaysAllow

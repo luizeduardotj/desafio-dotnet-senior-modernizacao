@@ -1,0 +1,20 @@
+# Nível 3 do kill switch (plano, seção 8): o SOAP vai do ingress direto ao legado, sem a fachada.
+# Use quando o defeito é na própria fachada. Depois do M5 de uma operação, ela não está mais no
+# legado e este caminho deixa de cobri-la (ADR-0008, "Ponto único de falha").
+# Como ligar: ver deploy/k8s/README.md.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - target:
+      group: networking.k8s.io
+      version: v1
+      kind: Ingress
+      name: nfse-soap
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/http/paths/0/backend/service/name
+        value: legado
+      - op: add
+        path: /metadata/annotations/nfse.rio~1break-glass
+        value: "ligado"

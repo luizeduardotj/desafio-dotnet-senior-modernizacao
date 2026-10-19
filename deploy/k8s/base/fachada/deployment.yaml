@@ -1,0 +1,136 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fachada
+spec:
+  # ADR-0008: processo sem estado, >= 2 réplicas.
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fachada
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Nunca abaixo da capacidade durante o rollout da versão (nível 4 é o undo deste rollout).
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fachada
+    spec:
+      serviceAccountName: fachada
+      automountServiceAccountToken: false
+      # Igual ao ShutdownTimeout padrão do host .NET (30 s): cobre leituras (5 s) e cancelamento (10 s)
+      # no novo. Uma chamada ao legado mais longa que ~25 s é cortada no desligamento do pod. [H]
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        # Usuário "app" das imagens mcr.microsoft.com/dotnet (UID 1654).
+        runAsUser: 1654
+        runAsGroup: 1654
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: fachada
+          matchLabelKeys:
+            - pod-template-hash
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: fachada
+          matchLabelKeys:
+            - pod-template-hash
+      containers:
+        - name: fachada
+          image: nfse-fachada
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: admin
+              containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: fachada-config
+          env:
+            - name: Admin__Token
+              valueFrom:
+                secretKeyRef:
+                  name: fachada-admin
+                  key: token
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: service.namespace=nfse,deployment.environment.name=$(NFSE_AMBIENTE),k8s.namespace.name=$(POD_NAMESPACE),k8s.pod.name=$(POD_NAME)
+          # Health só na porta de dados (PortaDoEndpoint): na 8081 só existe /admin.
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            # /health/ready exige as flags carregadas. Ver o risco em deploy/k8s/README.md
+            # ("readiness e fail-safe das flags").
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          lifecycle:
+            # Dá tempo ao ingress e ao kube-proxy de tirarem o pod dos endpoints antes do SIGTERM.
+            preStop:
+              sleep:
+                seconds: 5
+          # Valores [H]: calibrar no teste de carga (legado direto x via fachada, ADR-0008).
+          # Sem limite de CPU de propósito: throttling do CFS estoura o orçamento de <= 5 ms no p99
+          # de um proxy; o request garante a fatia e o limite de memória protege o nó.
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            # Diretório inteiro, nunca subPath: subPath não recebe as atualizações do ConfigMap.
+            - name: flags
+              mountPath: /etc/nfse/flags
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: flags
+          configMap:
+            name: fachada-flags
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

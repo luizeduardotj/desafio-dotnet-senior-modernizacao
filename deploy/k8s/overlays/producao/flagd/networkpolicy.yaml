@@ -1,0 +1,28 @@
+# Avaliação e sync só para a fachada; gestão (métricas) para a observabilidade.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: flagd
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: flagd
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: fachada
+      ports:
+        - port: 8013
+          protocol: TCP
+        - port: 8015
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observabilidade
+      ports:
+        - port: 8014
+          protocol: TCP

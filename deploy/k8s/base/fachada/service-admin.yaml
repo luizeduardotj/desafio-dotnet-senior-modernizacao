@@ -1,0 +1,18 @@
+# Porta administrativa (kill switch nível 2). Headless de propósito: o comando vale por réplica,
+# então o operador precisa do IP de cada pod, não de um IP balanceado que acertaria uma só.
+#   dig +short fachada-admin.nfse.svc.cluster.local   -> um A por réplica
+# publishNotReadyAddresses: uma réplica fora do ar para tráfego (readiness 503 por flags inválidas)
+# ainda precisa receber o kill switch.
+apiVersion: v1
+kind: Service
+metadata:
+  name: fachada-admin
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: fachada
+  ports:
+    - name: admin
+      port: 8081
+      targetPort: admin

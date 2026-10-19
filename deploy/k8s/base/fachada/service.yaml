@@ -1,0 +1,13 @@
+# Plano de dados: só a porta 8080. A 8081 (admin) não é exposta por este Service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: fachada
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: fachada
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

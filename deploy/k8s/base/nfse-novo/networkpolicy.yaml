@@ -1,0 +1,22 @@
+# Entrada do serviço novo: SOAP só da fachada; REST /api/v1 do ingress controller.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nfse-novo
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nfse-novo
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: fachada
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - port: 8080
+          protocol: TCP

@@ -1,0 +1,75 @@
+# kind/k3d na máquina do desenvolvedor. Legado e Oracle continuam no docker compose da raiz,
+# fora do cluster, como em produção. Imagens carregadas com `kind load docker-image`.
+#   kubectl apply -k deploy/k8s/overlays/local
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Também aqui, e não só na base: sem isso os Secrets gerados e os recursos deste overlay
+# iriam para o namespace default, e o merge dos configMapGenerator não acharia os da base.
+namespace: nfse
+
+resources:
+  - ../../base
+
+images:
+  - name: nfse-fachada
+    newTag: dev
+  - name: nfse-novo
+    newTag: dev
+
+# Valores de teste, só para o cluster local (o mesmo padrão das senhas do docker-compose.yml).
+# Em produção estes Secrets vêm do cofre (overlays/producao/external-secrets.yaml).
+secretGenerator:
+  - name: fachada-admin
+    literals:
+      - token=token-admin-local-dev
+  - name: nfse-novo-oracle
+    literals:
+      # As senhas são as passadas a db/moderno/01_usuarios.sql (&senha_app, &senha_ro) no ambiente local.
+      - app=User Id=NFSE_MODERNO_APP;Password=moderno_app_dev_123;Data Source=oracle:1521/FREEPDB1;Min Pool Size=2;Max Pool Size=20;Connection Timeout=15
+      - ro=User Id=NFSE_MODERNO_RO;Password=moderno_ro_dev_123;Data Source=oracle:1521/FREEPDB1;Min Pool Size=1;Max Pool Size=10;Connection Timeout=15
+
+configMapGenerator:
+  - name: fachada-config
+    behavior: merge
+    literals:
+      # otel-lgtm do compose, publicado no host.
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4317
+      - NFSE_AMBIENTE=local
+  - name: nfse-novo-config
+    behavior: merge
+    literals:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4317
+      - NFSE_AMBIENTE=local
+
+patches:
+  # Legado e Oracle do docker compose, alcançados pelo host (Docker Desktop resolve host.docker.internal
+  # dentro dos nós do kind). As portas do compose estão em 127.0.0.1; ver README se não conectar.
+  - target:
+      kind: Service
+      name: legado
+    patch: |-
+      - op: replace
+        path: /spec/externalName
+        value: host.docker.internal
+  - target:
+      kind: Service
+      name: oracle
+    patch: |-
+      - op: replace
+        path: /spec/externalName
+        value: host.docker.internal
+  - target:
+      kind: Ingress
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: nfse.localhost
+  # Máquina local: teto menor para não disputar CPU com o Oracle do compose.
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: nfse-novo
+    patch: |-
+      - op: replace
+        path: /spec/maxReplicas
+        value: 3

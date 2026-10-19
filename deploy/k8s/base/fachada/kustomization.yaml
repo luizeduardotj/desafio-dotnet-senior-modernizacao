@@ -1,0 +1,47 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: fachada
+      app.kubernetes.io/component: fachada
+    # Seletores escritos à mão nos manifests: includeSelectors reescreveria também os podSelector
+    # das NetworkPolicies (ex.: o "from: fachada" do nfse-novo viraria "from: nfse-novo").
+    includeSelectors: false
+    includeTemplates: true
+
+resources:
+  - serviceaccount.yaml
+  - deployment.yaml
+  - service.yaml
+  - service-admin.yaml
+  - pdb.yaml
+  - networkpolicy.yaml
+
+configMapGenerator:
+  # Configuração que não muda em tempo de execução. O hash no nome faz uma mudança aqui
+  # virar um rollout (nível 4), que é o que se quer para URL e timeout.
+  - name: fachada-config
+    literals:
+      - Fachada__Porta=8080
+      - Admin__Porta=8081
+      - Fachada__ArquivoDeFlags=/etc/nfse/flags/flags.json
+      - Legado__Url=http://legado:8080
+      - Legado__Timeout=00:01:40
+      - Novo__Url=http://nfse-novo:8080
+      - Novo__TimeoutLeitura=00:00:05
+      - Novo__TimeoutCancelamento=00:00:10
+      # O volume de ConfigMap troca o arquivo por symlink; o watcher por inotify não vê a troca.
+      - DOTNET_USE_POLLING_FILE_WATCHER=true
+      - OTEL_SERVICE_NAME=nfse-fachada
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.observabilidade:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - NFSE_AMBIENTE=indefinido
+  # Flags de migração (seção Migracao). Sem hash de propósito: mudar o arquivo NÃO reinicia
+  # os pods; o kubelet atualiza o volume e a fachada recarrega. Ver deploy/k8s/README.md
+  # (o atraso desse caminho é o motivo de o ADR-0008 apontar flagd como alvo).
+  - name: fachada-flags
+    files:
+      - flags.json
+    options:
+      disableNameSuffixHash: true

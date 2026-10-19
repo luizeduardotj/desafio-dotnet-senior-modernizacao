@@ -1,0 +1,26 @@
+# O flagd observa o CRD pela API do Kubernetes (sync "core.openfeature.dev/<ns>/<nome>").
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flagd
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: flagd-leitor-de-flags
+rules:
+  - apiGroups: ["core.openfeature.dev"]
+    resources: ["featureflags"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: flagd-leitor-de-flags
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: flagd-leitor-de-flags
+subjects:
+  - kind: ServiceAccount
+    name: flagd

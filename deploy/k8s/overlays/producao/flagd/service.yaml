@@ -1,0 +1,17 @@
+# 8013: avaliação (RPC). 8015: sync, para o provider OpenFeature em modo in-process, que avalia na
+# própria fachada e continua com o último retrato se o flagd cair.
+apiVersion: v1
+kind: Service
+metadata:
+  name: flagd
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: flagd
+  ports:
+    - name: avaliacao
+      port: 8013
+      targetPort: avaliacao
+    - name: sync
+      port: 8015
+      targetPort: sync

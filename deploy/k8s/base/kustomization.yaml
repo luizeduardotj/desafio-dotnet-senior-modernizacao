@@ -1,0 +1,18 @@
+# Base comum aos overlays: fachada, serviço novo, legado fora do cluster e ingress.
+# As tags de imagem e os segredos ficam nos overlays.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: nfse
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: nota-carioca
+    includeSelectors: false
+
+resources:
+  - namespace.yaml
+  - legado
+  - fachada
+  - nfse-novo
+  - ingress.yaml

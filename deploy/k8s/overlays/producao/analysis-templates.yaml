@@ -1,0 +1,69 @@
+# Métricas da ADR-0012 vistas no Prometheus da plataforma. Premissas [H]:
+#  - os serviços exportam http.server.request.duration por OTLP (TODO nos dois: ver README);
+#  - o OTel Collector anexa o label de pod rollouts-pod-template-hash (processador k8sattributes),
+#    que chega ao Prometheus como rollouts_pod_template_hash;
+#  - service.name vira o label job.
+# Limites espelham o plano (§6.1, §9): faults até +0,1 p.p. e p99 até 1,2 x o estável. Em 5xx
+# entram os soap:Fault que o legado e o novo devolvem de propósito (C20); por isso a comparação é
+# canário x estável, nunca um limite absoluto.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: erro-canario-vs-estavel
+spec:
+  args:
+    - name: servico
+    - name: hash-canario
+    - name: hash-estavel
+  metrics:
+    - name: taxa-5xx-canario-menos-estavel
+      interval: 2m
+      count: 15
+      failureLimit: 1
+      inconclusiveLimit: 3
+      # Sem tráfego (vetor vazio ou NaN) não passa nem falha: fica inconclusivo e o rollout pausa
+      # para alguém decidir. Não promover às cegas uma versão que ninguém exercitou.
+      successCondition: len(result) > 0 && result[0] <= 0.001
+      failureCondition: len(result) > 0 && result[0] > 0.001
+      provider:
+        prometheus:
+          address: http://prometheus.observabilidade:9090
+          query: |
+            (
+              sum(rate(http_server_request_duration_seconds_count{job="{{args.servico}}", rollouts_pod_template_hash="{{args.hash-canario}}", http_response_status_code=~"5.."}[5m]))
+              /
+              sum(rate(http_server_request_duration_seconds_count{job="{{args.servico}}", rollouts_pod_template_hash="{{args.hash-canario}}"}[5m]))
+            )
+            -
+            (
+              sum(rate(http_server_request_duration_seconds_count{job="{{args.servico}}", rollouts_pod_template_hash="{{args.hash-estavel}}", http_response_status_code=~"5.."}[5m]))
+              /
+              sum(rate(http_server_request_duration_seconds_count{job="{{args.servico}}", rollouts_pod_template_hash="{{args.hash-estavel}}"}[5m]))
+            )
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: latencia-canario-vs-estavel
+spec:
+  args:
+    - name: servico
+    - name: hash-canario
+    - name: hash-estavel
+  metrics:
+    - name: p99-canario-sobre-estavel
+      interval: 2m
+      count: 15
+      failureLimit: 1
+      inconclusiveLimit: 3
+      # Sem tráfego (vetor vazio ou NaN) não passa nem falha: fica inconclusivo e o rollout pausa
+      # para alguém decidir. Não promover às cegas uma versão que ninguém exercitou.
+      successCondition: len(result) > 0 && result[0] <= 1.2
+      failureCondition: len(result) > 0 && result[0] > 1.2
+      provider:
+        prometheus:
+          address: http://prometheus.observabilidade:9090
+          query: |
+            histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{job="{{args.servico}}", rollouts_pod_template_hash="{{args.hash-canario}}"}[5m])))
+            /
+            histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{job="{{args.servico}}", rollouts_pod_template_hash="{{args.hash-estavel}}"}[5m])))

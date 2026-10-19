@@ -1,0 +1,83 @@
+# Produção. Pré-requisitos no cluster (instalados pela plataforma, fora deste repositório):
+#   - ingress-nginx (namespace ingress-nginx)
+#   - Argo Rollouts (CRDs Rollout, AnalysisTemplate)
+#   - External Secrets Operator com o ClusterSecretStore "cofre-nfse"
+#   - CRD FeatureFlag (core.openfeature.dev), do OpenFeature Operator
+#   - Prometheus recebendo as métricas OTLP (ADR-0012)
+#   kubectl kustomize deploy/k8s/overlays/producao
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Também aqui, e não só na base: sem isso os Secrets gerados e os recursos deste overlay
+# iriam para o namespace default, e o merge dos configMapGenerator não acharia os da base.
+namespace: nfse
+
+resources:
+  - ../../base
+  - external-secrets.yaml
+  - rollouts.yaml
+  - analysis-templates.yaml
+  - flagd
+
+# Para o break-glass (nível 3), descomente e aplique; ver deploy/k8s/README.md.
+# components:
+#   - ../../components/break-glass
+
+images:
+  # Em produção, prefira fixar por digest (newTag: <versão>@sha256:...), que a CI publica.
+  - name: nfse-fachada
+    newName: registry.substituir.invalid/nfse/nfse-fachada
+    newTag: 0.1.0
+  - name: nfse-novo
+    newName: registry.substituir.invalid/nfse/nfse-novo
+    newTag: 0.1.0
+
+configMapGenerator:
+  - name: fachada-config
+    behavior: merge
+    literals:
+      - NFSE_AMBIENTE=producao
+  - name: nfse-novo-config
+    behavior: merge
+    literals:
+      - NFSE_AMBIENTE=producao
+
+patches:
+  - target:
+      kind: Service
+      name: legado
+    patch: |-
+      - op: replace
+        path: /spec/externalName
+        value: legado.nfse.substituir.invalid
+  - target:
+      kind: Service
+      name: oracle
+    patch: |-
+      - op: replace
+        path: /spec/externalName
+        value: oracle.nfse.substituir.invalid
+  - target:
+      kind: Ingress
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: nfse.substituir.invalid
+  # Argo Rollouts assume os pods (workloadRef) e escala o Deployment a zero quando a primeira
+  # revisão fica saudável. O template continua no Deployment da base: um lugar só para a imagem.
+  - path: fachada-sob-rollout.yaml
+  - path: nfse-novo-sob-rollout.yaml
+  # O HPA passa a escalar o Rollout, não o Deployment (que fica em zero).
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: nfse-novo
+    patch: |-
+      - op: replace
+        path: /spec/scaleTargetRef
+        value:
+          apiVersion: argoproj.io/v1alpha1
+          kind: Rollout
+          name: nfse-novo
+      - op: replace
+        path: /spec/minReplicas
+        value: 3

@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: nfse-novo
+      app.kubernetes.io/component: servico-novo
+    # Seletores escritos à mão nos manifests: includeSelectors reescreveria também os podSelector
+    # das NetworkPolicies (ex.: o "from: fachada" do nfse-novo viraria "from: nfse-novo").
+    includeSelectors: false
+    includeTemplates: true
+
+resources:
+  - serviceaccount.yaml
+  - deployment.yaml
+  - service.yaml
+  - hpa.yaml
+  - pdb.yaml
+  - networkpolicy.yaml
+
+configMapGenerator:
+  - name: nfse-novo-config
+    literals:
+      - ASPNETCORE_HTTP_PORTS=8080
+      - OTEL_SERVICE_NAME=nfse-novo
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.observabilidade:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - NFSE_AMBIENTE=indefinido
