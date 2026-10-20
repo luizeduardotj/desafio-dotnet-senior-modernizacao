@@ -4,6 +4,7 @@
 # (ex.: caso E001) imprime nada. Argumentos extras do compose (ex.: -p nome) vão em COMPOSE_ARGS.
 # uso: tests/paridade/estado-do-banco.sh <inscricao-municipal> <numero>
 set -euo pipefail
+PDB="${NFSE_ORACLE_PDB:-FREEPDB1}"  # outro PDB (ex.: XEPDB1 no XE 21c) em NFSE_ORACLE_PDB
 cd "$(dirname "$0")/../.."
 IM="${1:?inscrição municipal}"
 NUMERO="${2:-}"
@@ -14,7 +15,7 @@ NUMERO="${2:-}"
 {
     echo "WHENEVER SQLERROR EXIT FAILURE"
     echo "SET FEEDBACK OFF HEADING OFF PAGESIZE 0 LINESIZE 32767 TRIMOUT ON TAB OFF VERIFY OFF"
-    echo "ALTER SESSION SET CONTAINER = FREEPDB1;"
+    echo "ALTER SESSION SET CONTAINER = ${PDB};"
     echo "VARIABLE im VARCHAR2(20)"
     echo "VARIABLE numero NUMBER"
     echo "EXEC :im := '${IM}'"

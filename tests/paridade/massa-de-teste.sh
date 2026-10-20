@@ -5,6 +5,7 @@
 # CI e local: depois do `compose up` e antes de qualquer captura ou paridade (a linha de base passa a ser seed + massa).
 # Argumentos extras do compose (ex.: -p nome) vão em COMPOSE_ARGS.
 set -euo pipefail
+PDB="${NFSE_ORACLE_PDB:-FREEPDB1}"  # outro PDB (ex.: XEPDB1 no XE 21c) em NFSE_ORACLE_PDB
 cd "$(dirname "$0")/../.."
 
 # shellcheck disable=SC2086
@@ -13,6 +14,6 @@ compose() { docker compose ${COMPOSE_ARGS:-} "$@"; }
 for script in tests/paridade/massa/*.sql; do
     echo "massa: ${script}"
     { echo "WHENEVER SQLERROR EXIT FAILURE"; echo "SET FEEDBACK OFF";
-      echo "ALTER SESSION SET CONTAINER = FREEPDB1;"; echo "SET SERVEROUTPUT ON"; cat "$script"; echo "EXIT"; } |
+      echo "ALTER SESSION SET CONTAINER = ${PDB};"; echo "SET SERVEROUTPUT ON"; cat "$script"; echo "EXIT"; } |
         compose exec -T oracle sqlplus -s -L / as sysdba
 done

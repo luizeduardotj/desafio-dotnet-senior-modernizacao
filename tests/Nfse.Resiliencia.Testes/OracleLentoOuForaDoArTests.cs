@@ -160,7 +160,8 @@ public sealed class OracleLentoOuForaDoArTests(Ambiente ambiente, ITestOutputHel
             Assert.Equal(HttpStatusCode.InternalServerError, travada.Status);
             Assert.Contains("<faultcode>soap:Server</faultcode>", travada.Corpo, StringComparison.Ordinal);
             Assert.Contains("-> Novo (Percentual) status 500", await ambiente.RoteamentoAsync(travada), StringComparison.Ordinal);
-            Assert.InRange(travada.Duracao, TimeSpan.FromSeconds(5), TimeoutCancelamento);
+            // O WAIT 5 é contado pelo Oracle; o cronômetro do cliente pode fechar um pouco abaixo (4,9997 s no CI).
+            Assert.InRange(travada.Duracao, TimeSpan.FromSeconds(5) - TimeSpan.FromMilliseconds(200), TimeoutCancelamento);
         }
 
         // Lock solto: ninguém escreve depois (nem retry da fachada, nem o legado, nem o novo atrasado).

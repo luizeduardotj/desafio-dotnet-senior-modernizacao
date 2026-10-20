@@ -111,6 +111,8 @@ jobs:
           echo "NFSE_PARIDADE_ORACLE_RO=User Id=NFSE_MODERNO_RO;Password=moderno_ro_dev_123;Data Source=${porta}/XEPDB1" >> "$GITHUB_ENV"
       - name: Smoke test
         run: tools/smoke-compose.sh
+      - name: Massa de teste da paridade (C11, C13, C15)
+        run: tests/paridade/massa-de-teste.sh
       - name: Golden master das leituras recapturado no legado
         run: tests/paridade/recapturar-leituras-legado.sh
       - uses: actions/setup-dotnet@v4
