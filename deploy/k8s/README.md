@@ -39,7 +39,7 @@ O Ingress SOAP tem `proxy-body-size: 0` (o legado não limita o corpo e a fachad
 | Rollout | `RollingUpdate`, `maxUnavailable: 0`, `maxSurge: 1` | nunca abaixo da capacidade |
 | Probes | `startupProbe` e `livenessProbe` em `/health/live`, `readinessProbe` em `/health/ready`, todas na **8080** | a 8081 só tem `/admin` (`PortaDoEndpoint`) |
 | Recursos **[H]** | request 250m / 256Mi, limite de memória 512Mi, **sem limite de CPU** | throttling do CFS num proxy estoura o orçamento de ≤ 5 ms no p99; calibrar no teste de carga legado direto × via fachada |
-| Espalhamento | `topologySpreadConstraints` por nó (rígido) e zona (preferencial), `matchLabelKeys: pod-template-hash` | uma réplica por nó mesmo durante o rollout |
+| Espalhamento | `topologySpreadConstraints` por nó (rígido) e zona (preferencial), `matchLabelKeys: pod-template-hash`, `nodeTaintsPolicy: Honor` | uma réplica por nó mesmo durante o rollout; nó em drain fora da conta (ver [Calico e vários nós](#calico-e-vários-nós)) |
 | PDB | `maxUnavailable: 1` | drenagem sem derrubar a fachada |
 | Segurança | não root (UID 1654), rootfs só leitura, `drop: ALL`, seccomp, sem token de ServiceAccount | `/tmp` é `emptyDir` |
 | Admin | Service headless `fachada-admin`, só a porta 8081, `publishNotReadyAddresses` | o comando vale por réplica; uma réplica fora do Service de dados ainda recebe o kill switch |
@@ -167,7 +167,7 @@ O SOAP responde em `http://127.0.0.1:18080/NfseWS.asmx`. Para ver o YAML gerado 
 | `rollout restart` da fachada e do novo sob carga (k6 dentro do cluster, 10 + 1 req/s) | p99 de 119 ms (ConsultarNfse) e 874 ms (ServicoTomado); **2 de 662** `connection refused` |
 | O mesmo `rollout restart` da fachada sem as NetworkPolicies | **0 de 661** falhas |
 
-As duas falhas vêm do controlador de NetworkPolicy do k3s (kube-router): ele libera o IP do pod novo depois que o pod já está pronto e recebendo tráfego, e o pacote é rejeitado. Repetiu nas duas rodadas com política e não apareceu sem ela. Não mudei os manifests por isso, porque o comportamento é do CNI: em produção, repetir o teste com o CNI do cluster (Cilium ou Calico) antes de confiar em zero erro no rollout. Se repetir lá, a correção é um `initialDelaySeconds` no readiness da fachada maior que o tempo de programação da política.
+As duas falhas vêm do controlador de NetworkPolicy do k3s (kube-router): ele libera o IP do pod novo depois que o pod já está pronto e recebendo tráfego, e o pacote é rejeitado. Repetiu nas duas rodadas com política e não apareceu sem ela. Não mudei os manifests por isso, porque o comportamento é do CNI: em produção, repetir o teste com o CNI do cluster (Cilium ou Calico) antes de confiar em zero erro no rollout. Se repetir lá, a correção é um `initialDelaySeconds` no readiness da fachada maior que o tempo de programação da política. Com Calico não repetiu: 0 falhas em 4 restarts (ver [Calico e vários nós](#calico-e-vários-nós)).
 
 `kubectl kustomize` dos dois overlays roda sem erro e passa no `kubeconform` v0.8.0 (`-strict`), medido localmente:
 
@@ -218,4 +218,33 @@ Erros reais achados e corrigidos (um commit `fix(...)` cada):
 - `matchLabelKeys: pod-template-hash` não tem efeito sob o Argo Rollouts (os pods só têm `rollouts-pod-template-hash`).
 - Fachada sem `PooledConnectionLifetime`: com conexões keep-alive eternas, o canário do `nfse-novo` e uma réplica estável ficaram 10 min sem nenhuma requisição. Corrigido no código (1 min).
 
-Limites desta validação: um nó só (o espalhamento por nó e zona não é exercitado); CNI do k3s (kube-router), não o de produção; a análise só viu `ConsultarNfse` a poucas req/s, e com tráfego real o p99 por janela de 5 min é bem mais estável que aqui; o cofre é fake. Durante a primeira metade do teste, a VM do Docker ficou sem memória (swap cheio) e a API do k3s caiu várias vezes; a 1ª tentativa de rollback automático é dessa fase. Os números da tabela, menos esse, são da segunda metade, com 12 GB e sem pressão.
+Limites desta validação: um nó só (o espalhamento por nó e zona não é exercitado); CNI do k3s (kube-router), não o de produção (os dois repetidos em [Calico e vários nós](#calico-e-vários-nós)); a análise só viu `ConsultarNfse` a poucas req/s, e com tráfego real o p99 por janela de 5 min é bem mais estável que aqui; o cofre é fake. Durante a primeira metade do teste, a VM do Docker ficou sem memória (swap cheio) e a API do k3s caiu várias vezes; a 1ª tentativa de rollback automático é dessa fase. Os números da tabela, menos esse, são da segunda metade, com 12 GB e sem pressão.
+
+### Calico e vários nós
+
+**Cluster k3d `nfse-calico`, 2026-10-20 [M]**: 1 server + 2 agents (3 nós, todos agendáveis), sem flannel e sem o controlador de NetworkPolicy do k3s; **Calico v3.32.2** (manifest `calico.yaml` com `allow_ip_forwarding: true` e pool `10.42.0.0/16`, BGP + IPIP padrão); zonas `topology.kubernetes.io/zone`: server em `zona-a`, agents em `zona-b`. Plataforma, overlay e imagens como na seção anterior (`validacao/producao-k3d`), `ConsultarNfse` em `novo` 100% no CR e `ConsultarNfseServicoTomado` em `legado`. Carga: k6 na rede do compose, pelo ingress-nginx (2 réplicas), 10 req/s de `ConsultarNfse` + 1 req/s de `ServicoTomado`; cada falha logada com hora e erro.
+
+```bash
+k3d cluster create nfse-calico --servers 1 --agents 2 --network desafio-dotnet-senior-modernizacao_default --k3s-arg "--flannel-backend=none@server:*" --k3s-arg "--disable-network-policy@server:*" --k3s-arg "--disable=traefik@server:*" --kubeconfig-update-default=false --kubeconfig-switch-context=false
+```
+
+Sem flannel, o k3s não escreve `bin_dir`/`conf_dir` de CNI no containerd, que usa os padrões `/opt/cni/bin` e `/etc/cni/net.d`: o `calico.yaml` oficial funciona sem trocar caminhos. Antes dos drills, conferido que o Calico aplica as políticas: um pod em `default` não chega à fachada nem ao nfse-novo na 8080 (timeout); do namespace `ingress-nginx`, a fachada responde 200.
+
+| Cenário | Resultado |
+| --- | --- |
+| Espalhamento inicial | fachada, nfse-novo (3 pelo HPA) e flagd (2): uma réplica por nó; por zona, 1 em `zona-a` e 2 em `zona-b` |
+| Restart (`spec.restartAt`) da fachada sob carga, 2 vezes, **com** as NetworkPolicies | **0 de 1.631** e **0 de 1.636** falhas; 3 pods trocados em 15–31 s, de novo um por nó. Com kube-router tinham sido 2 de 662 `connection refused` (lá um `rollout restart` de Deployment no overlay local; aqui o restart do Argo, que troca os pods um a um; nos dois casos o IP do pod novo entra no Service assim que fica pronto) |
+| Restart do nfse-novo sob carga, 2 vezes | **0 de 1.650** na segunda rodada. Na primeira, 26 de 1.623 falharam, todas em `ServicoTomado` por timeout de 30 s do k6; essa operação estava em `legado` e não passa pelo nfse-novo: foi o legado/Oracle lento (mediana de 19 s na rodada), não o restart. Nenhum `connection refused` |
+| Drain de um agent sob carga, **antes** da correção | drain em 8 s respeitando os PDBs, **0 de 1.652** falhas, mas o substituto da fachada e o do nfse-novo ficaram **Pending** até o uncordon (`didn't match pod topology spread constraints`): **2/3 réplicas durante toda a manutenção** |
+| O mesmo drain **depois** da correção (`nodeTaintsPolicy: Honor`) | 3/3 de volta **8 s** depois do início do drain, nos 2 nós restantes (skew 2/1, dentro de `maxSkew: 1`); **0 de 1.652** falhas |
+| Kill switch nível 1 (`migracao.kill-switch` no CR), 6 trocas sob carga | nas 3 réplicas, a última requisição no estado antigo saiu **≤ 0,07 s** depois do patch; a primeira no estado novo, 0,09–1,49 s depois (limitada pela chegada de requisições: ~3 req/s por réplica) |
+| Canário da fachada (mudança real: a correção acima) | análise aprovou duas vezes (5xx: diferença 0; p99: 0,99× e 1,07×); promovido 34% → 67% → 100%, uma réplica por nó em cada degrau (o espalhamento por `rollouts-pod-template-hash` deixa canário e estável dividirem nó) |
+| Canário do nfse-novo (mesma mudança) | **abortado pela análise duas vezes**: p99 do canário 22× e 4,3×, depois 1,70× e 1,74× o estável; 5xx: diferença 0. O Argo escalou o canário a zero sozinho; as 3 réplicas estáveis seguiram atendendo. Promovido à mão (`promote --full`) |
+| Tráfego durante kill switch, canários, os 2 abortos e as promoções | k6: **0 de 12.588** falhas |
+
+**Correção (commit `fix(deploy)`):** sem `nodeTaintsPolicy`, o padrão é `Ignore`: o nó em cordon continua contando como domínio do espalhamento por nó, com 0 pods, e pôr a 3ª réplica num dos outros dois daria skew 2. Com réplicas = nós (3 em produção) e `DoNotSchedule`, qualquer drain deixava a fachada e o nfse-novo com 2/3 até o uncordon. `Honor` tira da conta o nó com o taint `unschedulable`. Vale nas duas restrições (nó e zona) da fachada e do nfse-novo.
+
+**Falso positivo da análise do nfse-novo.** O binário era o mesmo; só mudou o agendamento. A mediana do canário e a do estável eram iguais (2,5 ms), mas: (1) o canário recebeu 0,8 req/s, contra 1,7–4,8 req/s de cada réplica estável (a fachada recicla conexões a cada 1 min, e a divisão por conexão fica desigual a poucas req/s); (2) com mediana de 2,5 ms, 1,2× no p99 é cerca de 1 ms, e três réplicas **estáveis** idênticas tinham p99 de 5, 5 e 16 ms na mesma janela. A essa taxa, a variação entre pods iguais é maior que a margem do plano. Não mudei o limite (é critério do plano, §6.1); proposta: exigir um mínimo de requisições do canário na janela (inconclusivo abaixo disso) ou um piso absoluto de diferença no p99, a decidir com o plano. Com tráfego de produção a janela de 5 min tem amostras suficientes e o problema tende a sumir, mas o aborto em horário de pouco tráfego é provável.
+
+Limites: o k3d põe os 3 "nós" na mesma VM do Docker, então zona é só rótulo (sem latência entre zonas, sem perda de zona); o ingress-nginx recebeu a carga pelo IP de um nó só; durante a montagem, outras stacks na mesma VM esgotaram a memória e o cluster ficou parado ~15 min (os números acima são de depois, com a VM sem pressão). O cluster foi apagado no fim.
+

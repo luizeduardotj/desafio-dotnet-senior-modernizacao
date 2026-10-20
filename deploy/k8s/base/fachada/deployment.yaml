@@ -36,6 +36,9 @@ spec:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
           whenUnsatisfiable: DoNotSchedule
+          # Nó em cordon/drain (taint unschedulable) sai da conta. Sem isso ele conta como domínio com 0 pods
+          # e, com réplicas = nós, o substituto do pod drenado fica Pending até o uncordon (medido em k3d).
+          nodeTaintsPolicy: Honor
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: fachada
@@ -44,6 +47,7 @@ spec:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
           whenUnsatisfiable: ScheduleAnyway
+          nodeTaintsPolicy: Honor
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: fachada
