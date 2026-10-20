@@ -29,6 +29,15 @@ internal static partial class Log
     public static void KillSwitchAlterado(ILogger logger, bool ativado, string alcance) =>
         KillSwitchAlteradoCore(logger, ativado ? "ativado" : "desativado", alcance);
 
+    // Rollback automático (ADR-0014). Só operação, gatilho, números e a ficha de rearme escolhida por um humano.
+    [LoggerMessage(30, LogLevel.Critical,
+        "Rollback automático: {Operacao} volta ao legado nesta réplica (gatilho {Gatilho}: {Detalhe}). " +
+        "Aplique o kill switch nível 1 e, para desarmar, troque RollbackAutomatico.Rearme (guardado: '{Rearme}')")]
+    public static partial void RollbackDisparado(ILogger logger, string operacao, string gatilho, string detalhe, string rearme);
+
+    [LoggerMessage(31, LogLevel.Warning, "Rollback automático de {Operacao} desarmado pela troca de RollbackAutomatico.Rearme (gatilho era {Gatilho})")]
+    public static partial void RollbackDesarmado(ILogger logger, string operacao, string gatilho);
+
     // Sombra (ADR-0009). A requisição só entra pseudonimizada; as respostas, só como SHA-256.
     [LoggerMessage(20, LogLevel.Debug, "Sombra {Operacao}: igual (trace {TraceId})")]
     public static partial void SombraIgual(ILogger logger, string operacao, string traceId);

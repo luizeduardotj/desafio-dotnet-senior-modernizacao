@@ -30,22 +30,23 @@ public sealed class CancelamentoDeNota(ConsultaDeNotasEmitidas consulta, IGatewa
         }
 
         ResultadoDoGateway resultado = await gateway.CancelarAsync(prestador.Id, numero, motivo, cancellationToken).ConfigureAwait(false);
-        CompararComODominio(resultado);
-        return new RespostaDoCancelamento(resultado.Decisao, resultado.DataCancelamento);
+        bool divergente = CompararComODominio(resultado);
+        return new RespostaDoCancelamento(resultado.Decisao, resultado.DataCancelamento, divergente);
     }
 
-    private static void CompararComODominio(ResultadoDoGateway resultado)
+    /// <returns>Se a divergência ficou <c>nao_classificada</c> (a de fronteira de relógio é explicada).</returns>
+    private static bool CompararComODominio(ResultadoDoGateway resultado)
     {
         // Nota inexistente não tem snapshot: as duas regras concordam por construção.
         if (resultado.EstadoAntes is null || resultado.AgoraNoBanco is not { } agora)
         {
-            return;
+            return false;
         }
 
         DecisaoDeCancelamento dominio = PoliticaDeCancelamento.Avaliar(resultado.EstadoAntes, agora);
         if (dominio == resultado.Decisao)
         {
-            return;
+            return false;
         }
 
         // O SYSDATE do PL/SQL pode cair no segundo seguinte ao lido pelo wrapper.
@@ -54,5 +55,6 @@ public sealed class CancelamentoDeNota(ConsultaDeNotasEmitidas consulta, IGatewa
             new KeyValuePair<string, object?>("decisao_plsql", resultado.Decisao.ToString()),
             new KeyValuePair<string, object?>("decisao_dominio", dominio.ToString()),
             new KeyValuePair<string, object?>("classe", fronteira ? "fronteira_relogio" : "nao_classificada"));
+        return !fronteira;
     }
 }

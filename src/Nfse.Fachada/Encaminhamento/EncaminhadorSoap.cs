@@ -5,6 +5,7 @@ using Nfse.Fachada.Admin;
 using Nfse.Fachada.Configuracao;
 using Nfse.Fachada.Flags;
 using Nfse.Fachada.Observabilidade;
+using Nfse.Fachada.Rollback;
 using Nfse.Fachada.Roteamento;
 using Nfse.Fachada.Sombra;
 using Yarp.ReverseProxy.Forwarder;
@@ -20,6 +21,7 @@ public sealed class EncaminhadorSoap(
     IOptionsMonitor<OpcoesLegado> legado,
     IOptionsMonitor<OpcoesNovo> novo,
     PublicadorDaSombra sombra,
+    RollbackAutomatico rollback,
     ILogger<EncaminhadorSoap> logger)
 {
     /// <summary>POST de <c>/NfseWS.asmx</c>: decide o destino pela operação do <c>SOAPAction</c>.</summary>
@@ -31,6 +33,7 @@ public sealed class EncaminhadorSoap(
         string modo = "legado"; // fora do escopo é sempre legado
         Decisao decisao;
         FlagsDeMigracao? flags = null;
+        FlagsDaOperacao? flagsDaOperacao = null;
         string? fonteDasFlags = null;
         ReadOnlyMemory<byte>? corpo = null;
 
@@ -44,7 +47,8 @@ public sealed class EncaminhadorSoap(
             flags = fonteDeFlags.Atual();
             fonteDasFlags = fonteDeFlags.Nome;
             bool killSwitchAdministrativo = killSwitch.Ativo(operacao);
-            modo = flags is null ? "indisponivel" : Telemetria.NomeDoModo(flags.Da(operacao).Modo);
+            flagsDaOperacao = flags?.Da(operacao);
+            modo = flagsDaOperacao is null ? "indisponivel" : Telemetria.NomeDoModo(flagsDaOperacao.Modo);
 
             string? chave = null;
             if (DecisorDeDestino.RequerChave(operacao, flags, killSwitchAdministrativo))
@@ -59,15 +63,20 @@ public sealed class EncaminhadorSoap(
             {
                 decisao = new(Destino.Legado, MotivoDeRoteamento.NovoNaoConfigurado);
             }
+
+            // ADR-0014: depois do decisor e só na direção do legado.
+            decisao = RollbackAutomatico.Aplicar(decisao, rollback.Disparado(operacao, flagsDaOperacao));
         }
 
         TimeSpan noDestino;
+        ResultadoNoNovo? noNovo = null;
         if (decisao.Destino == Destino.Novo && corpo is not null && PublicadorDaSombra.CopiavelInvertida(operacao, flags))
         {
             // Sombra invertida (só leituras): o novo responde, o tee copia, e os workers repetem no legado. Com fallback
             // quem respondeu foi o legado, e não há o que copiar.
             using CapturaDaResposta.Instalada captura = CapturaDaResposta.Instalar(ctx, OpcoesSombra.LimiteDaResposta);
-            (decisao, noDestino) = await EncaminharAoNovoAsync(ctx, operacao, nome, decisao).ConfigureAwait(false);
+            ResultadoNoNovo resultado = await EncaminharAoNovoAsync(ctx, operacao, nome, decisao).ConfigureAwait(false);
+            (decisao, noDestino, noNovo) = (resultado.Decisao, resultado.NoDestino, resultado);
             if (decisao.Destino == Destino.Novo)
             {
                 sombra.AvaliarDepoisDoNovo(ctx, operacao, flags!.Da(operacao).Sombra.Amostragem, corpo, captura.Captura, inicio);
@@ -75,7 +84,8 @@ public sealed class EncaminhadorSoap(
         }
         else if (decisao.Destino == Destino.Novo)
         {
-            (decisao, noDestino) = await EncaminharAoNovoAsync(ctx, operacao, nome, decisao).ConfigureAwait(false);
+            ResultadoNoNovo resultado = await EncaminharAoNovoAsync(ctx, operacao, nome, decisao).ConfigureAwait(false);
+            (decisao, noDestino, noNovo) = (resultado.Decisao, resultado.NoDestino, resultado);
         }
         else if (sombra.Copiavel(operacao, decisao))
         {
@@ -93,11 +103,28 @@ public sealed class EncaminhadorSoap(
             noDestino = await EncaminharAoLegadoAsync(ctx, nome).ConfigureAwait(false);
         }
 
+        if (flagsDaOperacao is not null && !ctx.RequestAborted.IsCancellationRequested)
+        {
+            rollback.Observar(operacao, flagsDaOperacao, Observar(decisao, ctx.Response.StatusCode, noDestino, noNovo));
+        }
+
         TimeSpan total = Stopwatch.GetElapsedTime(inicio);
         Telemetria.MarcarSpan(nome, modo, decisao, fonteDasFlags);
         Telemetria.ContarRequisicao(nome, modo, decisao.Destino, ctx.Response.StatusCode);
         Telemetria.MedirOverhead(nome, total - noDestino);
         Log.Roteada(logger, nome, decisao.Destino, decisao.Motivo, ctx.Response.StatusCode, (long)total.TotalMilliseconds);
+    }
+
+    /// <summary>O que o rollback automático vê da requisição: o mesmo status e a mesma duração das métricas.</summary>
+    private static Observacao Observar(Decisao decisao, int status, TimeSpan noDestino, ResultadoNoNovo? noNovo)
+    {
+        bool fault = Telemetria.Resultado(status) == "fault";
+        return noNovo switch
+        {
+            { Decisao.Motivo: MotivoDeRoteamento.Fallback } n => new(Destino.Novo, Fault: false, Fallback: true, n.NoNovo),
+            { } n => new(Destino.Novo, fault, Fallback: false, n.NoNovo, n.RegraDivergente),
+            null => new(Destino.Legado, fault, Fallback: false, noDestino),
+        };
     }
 
     /// <summary>Pass-through ao legado: WSDL, <c>/health</c> do legado e qualquer outro caminho.</summary>
@@ -127,8 +154,13 @@ public sealed class EncaminhadorSoap(
         return duracao;
     }
 
-    /// <returns>A decisão final (fallback muda o destino) e o tempo gasto nos destinos, somando o eventual legado.</returns>
-    private async Task<(Decisao Decisao, TimeSpan NoDestino)> EncaminharAoNovoAsync(HttpContext ctx, string operacao, string nome, Decisao decisao)
+    /// <param name="Decisao">A decisão final (fallback muda o destino).</param>
+    /// <param name="NoDestino">Tempo gasto nos destinos, somando o eventual legado.</param>
+    /// <param name="NoNovo">Tempo só na chamada ao novo.</param>
+    /// <param name="RegraDivergente">O novo marcou o dual-run como divergente (ADR-0014).</param>
+    private readonly record struct ResultadoNoNovo(Decisao Decisao, TimeSpan NoDestino, TimeSpan NoNovo, bool RegraDivergente);
+
+    private async Task<ResultadoNoNovo> EncaminharAoNovoAsync(HttpContext ctx, string operacao, string nome, Decisao decisao)
     {
         OpcoesNovo opcoes = novo.CurrentValue;
         bool leitura = OperacoesSoap.EhLeitura(operacao);
@@ -144,12 +176,12 @@ public sealed class EncaminhadorSoap(
 
         if (erro == ForwarderError.None && transformador.StatusDescartado is null)
         {
-            return (decisao, noNovo);
+            return new(decisao, noNovo, noNovo, transformador.RegraDivergente);
         }
 
         if (ctx.RequestAborted.IsCancellationRequested)
         {
-            return (decisao, noNovo);
+            return new(decisao, noNovo, noNovo, transformador.RegraDivergente);
         }
 
         string descricao = transformador.StatusDescartado is int status ? $"HTTP {status}" : erro.ToString();
@@ -167,7 +199,7 @@ public sealed class EncaminhadorSoap(
             ctx.Features.Set<IForwarderErrorFeature>(null);
             ctx.Request.Body.Position = 0;
             TimeSpan noLegado = await EncaminharAoLegadoAsync(ctx, nome).ConfigureAwait(false);
-            return (new(Destino.Legado, MotivoDeRoteamento.Fallback), noNovo + noLegado);
+            return new(new(Destino.Legado, MotivoDeRoteamento.Fallback), noNovo + noLegado, noNovo, RegraDivergente: false);
         }
 
         Log.FalhaSemFallback(logger, nome, descricao);
@@ -177,7 +209,7 @@ public sealed class EncaminhadorSoap(
             await FaultSoap.EscreverAsync(ctx, "soap:Server", "Erro interno: falha ao processar a requisição").ConfigureAwait(false);
         }
 
-        return (decisao, noNovo);
+        return new(decisao, noNovo, noNovo, transformador.RegraDivergente);
     }
 
     private static string CausaDoFallback(int? statusDescartado, ForwarderError erro, Exception? excecao) =>

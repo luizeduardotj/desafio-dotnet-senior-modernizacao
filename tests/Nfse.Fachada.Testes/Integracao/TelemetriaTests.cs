@@ -139,7 +139,7 @@ public sealed class TelemetriaTests : IAsyncLifetime, IDisposable
 
         (await fachada.EnviarSoapAsync("x", [], "\"http://notacarioca.rio.gov.br/10000001\"")).Dispose();
 
-        string[] permitidas = ["operacao", "modo", "destino", "resultado", "causa", "classe", "motivo"];
+        string[] permitidas = ["operacao", "modo", "destino", "resultado", "causa", "classe", "motivo", "gatilho"];
         Assert.NotEmpty(_medicoes);
         Assert.All(_medicoes, m => Assert.All(m.Tags.Keys, chave => Assert.Contains(chave, permitidas)));
         Assert.DoesNotContain(_medicoes, m => m.Instrumento == "fachada_roteamento_total");

@@ -2,7 +2,7 @@
 
 - **Status:** Aceito
 - **Data:** 2026-10-16
-- **Relacionados:** [0004](0004-comportamentos-legados-nao-documentados.md), [0008](0008-fachada-yarp-roteamento-e-flags.md), [0009](0009-sombra-escrita-unica-e-idempotencia.md), [plano de migração](../plano-de-migracao.md)
+- **Relacionados:** [0004](0004-comportamentos-legados-nao-documentados.md), [0008](0008-fachada-yarp-roteamento-e-flags.md), [0009](0009-sombra-escrita-unica-e-idempotencia.md), [0014](0014-rollback-automatico-pela-fachada.md), [plano de migração](../plano-de-migracao.md)
 
 ## Contexto
 
@@ -83,11 +83,12 @@ Em Kubernetes, o mesmo OTLP aponta para o backend da plataforma.
 
 Os alertas usam só as classes **automáticas** do [ADR-0009](0009-sombra-escrita-unica-e-idempotencia.md); `bug_novo`/`bug_legado` são resultado de triagem humana e alimentam o plano, não alertas.
 
-Exemplos de alertas que **pedem rollback imediato**. Hoje o alerta chama o plantão, que aciona o nível 1 do kill switch (medido em 0,12–0,24 s no cluster); a volta automática pela própria fachada está prevista para o M1. Automáticos de verdade hoje são só o fail-safe para `legado` quando as flags não carregam e o abort do canário pela análise do Argo Rollouts:
+Exemplos de gatilhos que **pedem rollback imediato**. Desde a [ADR-0014](0014-rollback-automatico-pela-fachada.md), a própria fachada volta a operação ao legado nos três primeiros, por réplica, com janela de 15 min, mínimo de amostras e limites de Wilson; o disparo emite `rollback_automatico_ativo` e `rollback_automatico_disparos_total`, e o alerta sobre eles chama o plantão, que aplica o nível 1 do kill switch (medido em 0,12–0,24 s no cluster) para o rollback valer em todas as réplicas e sobreviver a restart. Também são automáticos o fail-safe para `legado` quando as flags não carregam e o abort do canário pela análise do Argo Rollouts:
 
-- `cancelamento_regra_divergente_total` > 0 (dual-run) ou divergência `nao_classificada` > 0 em cancelamento;
-- p99 do novo > 1,2 × p99 do legado por 15 min;
-- taxa de `fault` do novo > taxa do legado + 0,1 p.p.
+- `cancelamento_regra_divergente_total` > 0 (dual-run): automático pela fachada, que recebe o sinal no header interno `X-Nfse-Dual-Run` da resposta do novo;
+- p99 do novo > 1,2 × p99 do legado por 15 min: automático;
+- taxa de `fault` do novo > taxa do legado + 0,1 p.p.: automático (e o fallback acima de 5% das tentativas no novo, também);
+- divergência `nao_classificada` > 0 em cancelamento: só alerta, porque ocorre em sombra, com o cliente já no legado.
 
 Exemplos de alertas que **bloqueiam avanço**:
 

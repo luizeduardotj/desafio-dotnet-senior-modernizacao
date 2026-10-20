@@ -35,7 +35,9 @@ public class CancelamentoTests : IClassFixture<FabricaDoHost>
         (motivo is null ? "" : $"<Motivo>{motivo}</Motivo>") +
         "</InfPedidoCancelamento></Pedido></CancelarNfseEnvio>";
 
-    private async Task<string> SoapAsync(string entrada)
+    private async Task<string> SoapAsync(string entrada) => await (await SoapComRespostaAsync(entrada)).Content.ReadAsStringAsync();
+
+    private async Task<HttpResponseMessage> SoapComRespostaAsync(string entrada)
     {
         string envelope =
             "<?xml version=\"1.0\" encoding=\"utf-8\"?><soap:Envelope xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\"><soap:Body>" +
@@ -43,8 +45,7 @@ public class CancelamentoTests : IClassFixture<FabricaDoHost>
         using var conteudo = new StringContent(envelope, Encoding.UTF8, "text/xml");
         using var pedido = new HttpRequestMessage(HttpMethod.Post, "/NfseWS.asmx") { Content = conteudo };
         pedido.Headers.Add("SOAPAction", "\"http://notacarioca.rio.gov.br/CancelarNfse\"");
-        using HttpResponseMessage resposta = await _fabrica.CreateClient().SendAsync(pedido);
-        return await resposta.Content.ReadAsStringAsync();
+        return await _fabrica.CreateClient().SendAsync(pedido);
     }
 
     [Fact]
@@ -109,6 +110,36 @@ public class CancelamentoTests : IClassFixture<FabricaDoHost>
 
         Assert.Contains("&lt;Codigo&gt;E052&lt;/Codigo&gt;", corpo, StringComparison.Ordinal); // vale o PL/SQL
         Assert.Equal(1, Interlocked.Read(ref contagem));
+    }
+
+    [Fact]
+    public async Task Dual_run_nao_classificado_sinaliza_a_fachada_por_header()
+    {
+        Responder(DecisaoDeCancelamento.PrazoExpirado);
+        using HttpResponseMessage divergente = await SoapComRespostaAsync(Pedido());
+
+        Responder(DecisaoDeCancelamento.Permitido);
+        using HttpResponseMessage igual = await SoapComRespostaAsync(Pedido());
+
+        Assert.Equal("divergente", Assert.Single(divergente.Headers.GetValues("X-Nfse-Dual-Run")));
+        Assert.False(igual.Headers.Contains("X-Nfse-Dual-Run"));
+    }
+
+    [Fact]
+    public async Task Dual_run_na_fronteira_do_relogio_nao_sinaliza()
+    {
+        // SYSDATE lido sob lock 1 s antes do fim do prazo; o PL/SQL já viu o segundo seguinte: fronteira_relogio.
+        var fimDoPrazo = new Competencia(2026, 10).FimDoPrazoDeCancelamento;
+        _fabrica.Dados.RespostaDoCancelamento = new ResultadoDoGateway(
+            DecisaoDeCancelamento.PrazoExpirado,
+            new EstadoParaCancelamento(SituacaoNota.Normal, new Competencia(2026, 10), false),
+            fimDoPrazo.AddSeconds(-1),
+            null);
+
+        using HttpResponseMessage resposta = await SoapComRespostaAsync(Pedido());
+
+        Assert.Contains("E052", await resposta.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.False(resposta.Headers.Contains("X-Nfse-Dual-Run"));
     }
 
     private HttpClient Rest(string inscricoes = "10000001")

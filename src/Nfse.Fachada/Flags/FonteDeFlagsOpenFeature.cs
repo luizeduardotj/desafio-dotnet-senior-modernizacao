@@ -13,8 +13,8 @@ namespace Nfse.Fachada.Flags;
 /// Flags de migração avaliadas pelo OpenFeature (provider flagd em produção), no mesmo retrato
 /// <see cref="FlagsDeMigracao"/> da fonte por arquivo. Chaves, as mesmas do <c>FeatureFlag</c> do overlay de produção:
 /// <c>migracao.kill-switch</c> (booleano), e por operação em escopo <c>&lt;Operacao&gt;.kill-switch</c> (booleano) e
-/// <c>&lt;Operacao&gt;.config</c> (objeto com <c>Modo</c>, <c>Percentual</c>, <c>Inclusao</c>, <c>Exclusao</c> e
-/// <c>Sombra.Amostragem</c>, como no arquivo).
+/// <c>&lt;Operacao&gt;.config</c> (objeto com <c>Modo</c>, <c>Percentual</c>, <c>Inclusao</c>, <c>Exclusao</c>,
+/// <c>Sombra.Amostragem</c> e <c>RollbackAutomatico</c>, como no arquivo).
 /// </summary>
 /// <remarks>
 /// O retrato é montado fora do caminho da requisição, a cada evento do provider (pronto ou configuração alterada, que o
@@ -238,6 +238,9 @@ public sealed class FonteDeFlagsOpenFeature : BackgroundService, IFonteDeFlags
                 case nameof(FlagsDaOperacao.Sombra) when TentarSombra(v, out FlagsDaSombra sombra):
                     op.Sombra = sombra;
                     break;
+                case nameof(FlagsDaOperacao.RollbackAutomatico) when TentarRollback(v, out FlagsDoRollbackAutomatico rollback):
+                    op.RollbackAutomatico = rollback;
+                    break;
                 default:
                     erro = $"campo {campo} inválido";
                     return null;
@@ -318,6 +321,32 @@ public sealed class FonteDeFlagsOpenFeature : BackgroundService, IFonteDeFlags
                     break;
                 case nameof(FlagsDaSombra.Invertida) when valor.IsBoolean:
                     sombra.Invertida = valor.AsBoolean!.Value;
+                    break;
+                default:
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TentarRollback(Value v, out FlagsDoRollbackAutomatico rollback)
+    {
+        rollback = new FlagsDoRollbackAutomatico();
+        if (!v.IsStructure)
+        {
+            return false;
+        }
+
+        foreach ((string campo, Value valor) in v.AsStructure!.AsDictionary())
+        {
+            switch (campo)
+            {
+                case nameof(FlagsDoRollbackAutomatico.Ligado) when valor.IsBoolean:
+                    rollback.Ligado = valor.AsBoolean!.Value;
+                    break;
+                case nameof(FlagsDoRollbackAutomatico.Rearme) when valor.IsString:
+                    rollback.Rearme = valor.AsString!;
                     break;
                 default:
                     return false;

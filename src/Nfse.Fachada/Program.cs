@@ -7,6 +7,7 @@ using Nfse.Fachada.Configuracao;
 using Nfse.Fachada.Encaminhamento;
 using Nfse.Fachada.Flags;
 using Nfse.Fachada.Observabilidade;
+using Nfse.Fachada.Rollback;
 using Nfse.Fachada.Sombra;
 using Nfse.Fachada.Sombra.Reproducao;
 using Nfse.Observabilidade;
@@ -77,6 +78,11 @@ switch (opcoesFlags.Fonte.Trim().ToLowerInvariant())
 }
 
 builder.Services.AddSingleton<KillSwitchAdministrativo>();
+
+// Rollback automático (ADR-0014): estado por réplica, relógio injetado, só na direção do legado.
+builder.Services.TryAddSingleton(TimeProvider.System);
+builder.Services.AddOptions<OpcoesRollbackAutomatico>().BindConfiguration(OpcoesRollbackAutomatico.Secao).ValidateDataAnnotations().ValidateOnStart();
+builder.Services.AddSingleton<RollbackAutomatico>();
 builder.Services.AddSingleton<EncaminhadorSoap>();
 
 // Sombra (ADR-0009): canal limitado, workers e clientes HTTP próprios, fora do caminho do cliente. Leituras são
@@ -102,6 +108,7 @@ if (app.Services.GetRequiredService<IOptions<OpcoesFachada>>().Value.Porta == ap
 
 // Os gauges são observáveis: só precisam existir para entrar na coleta.
 app.Services.GetRequiredService<MedidoresDeEstado>();
+app.Services.GetRequiredService<RollbackAutomatico>();
 
 // Plano de dados só na porta pública; administração só na interna (PortaDoEndpointMatcherPolicy).
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false }).SomenteNaPorta(Plano.Dados);

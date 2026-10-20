@@ -1,6 +1,6 @@
 # Nfse.Fachada
 
-Proxy north-south na frente de `/NfseWS.asmx` ([ADR-0008](../../docs/adr/0008-fachada-yarp-roteamento-e-flags.md)). Decide, por operação, entre o legado e o serviço novo. Não tem regra de NFS-e, nem banco, nem estado além do kill switch administrativo da réplica.
+Proxy north-south na frente de `/NfseWS.asmx` ([ADR-0008](../../docs/adr/0008-fachada-yarp-roteamento-e-flags.md)). Decide, por operação, entre o legado e o serviço novo. Não tem regra de NFS-e, nem banco, nem estado além do kill switch administrativo e do [rollback automático](#rollback-automático) da réplica.
 
 Estado atual: **M0** do [plano](../../docs/plano-de-migracao.md). As flags de [`flags.json`](flags.json) deixam as três operações em `legado`. A decisão de destino está pronta e testada, e a sombra também: das leituras e do cancelamento ([Sombra](#sombra)).
 
@@ -9,10 +9,10 @@ Estado atual: **M0** do [plano](../../docs/plano-de-migracao.md). As flags de [`
 | Requisição | Caminho |
 | --- | --- |
 | `POST /NfseWS.asmx`, operação fora do escopo (C21/C29: sufixo do `SOAPAction`, sensível a maiúsculas) | legado, em streaming, sem ler o corpo, sem retry |
-| `POST /NfseWS.asmx`, `ConsultarNfse`, `ConsultarNfseServicoTomado` ou `CancelarNfse` | [`DecisorDeDestino`](Roteamento/DecisorDeDestino.cs): kill switch → modo → listas → `xxHash64(op\|chave) % 100 < percentual` |
+| `POST /NfseWS.asmx`, `ConsultarNfse`, `ConsultarNfseServicoTomado` ou `CancelarNfse` | [`DecisorDeDestino`](Roteamento/DecisorDeDestino.cs): kill switch → modo → listas → `xxHash64(op\|chave) % 100 < percentual`; depois, o [rollback automático](#rollback-automático) troca `novo` por `legado` se a operação disparou |
 | `GET /NfseWS.asmx?wsdl`, `/health` e qualquer outro caminho | legado, sem alteração |
 | `/health/live`, `/health/ready` | a própria fachada (`ready` exige flags carregadas) |
-| `/admin/kill-switch` | só na porta interna, com token |
+| `/admin/kill-switch`, `/admin/rollback-automatico` | só na porta interna, com token |
 
 Os dois planos são separados no roteamento pela porta local da conexão ([`PortaDoEndpoint`](Configuracao/PortaDoEndpoint.cs)). Na porta interna só existem os endpoints `/admin`: SOAP, pass-through e health dão 404 e nada chega ao legado. Na porta pública, `/admin/...` dá 404 e também não vai ao legado. A separação não usa `RequireHost`, porque o header Host vem do cliente e, atrás do ingress, não traz a porta do Kestrel. `Fachada:Porta` e `Admin:Porta` precisam ser diferentes: o processo não sobe se forem iguais.
 
@@ -166,6 +166,11 @@ dotnet Nfse.Fachada.dll reproduzir reexecutar /dados/20261019T150000Z-<guid>.nfs
 | `Sombra__Reproducao__Retencao` | `15.00:00:00` | idade máxima de um arquivo; a limpeza roda a cada `Sombra__Reproducao__IntervaloDaLimpeza` (1 h) |
 | `Sombra__Reproducao__PorSegundo` | `1` | arquivos gravados por segundo, por operação; `0` não grava |
 | `Sombra__Reproducao__ChavesAnteriores__<id>` | — | **só na ferramenta**: chaves rotacionadas ainda na retenção |
+| `RollbackAutomatico__Janela` / `__Baldes` | `00:15:00` / `15` | janela deslizante dos gatilhos; lidos na partida |
+| `RollbackAutomatico__MinimoDeAmostras` / `__MinimoDeAmostrasDoP99` | `100` / `1000` | abaixo disso, nenhum gatilho estatístico dispara |
+| `RollbackAutomatico__Z` | `3.29` | quantil normal dos limites de confiança (99,9%) |
+| `RollbackAutomatico__MargemDeFault` / `__FatorDoP99` / `__LimiteDeFallback` | `0.001` / `1.2` / `0.05` | limites dos gatilhos `fault`, `p99` e `fallback` |
+| `RollbackAutomatico__Referencias__<Operacao>__TaxaDeFault` / `__P99` | — | linha de base do legado no M0, para quando ele não tem amostras na janela |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | coletor OTLP (no compose, `http://otel-lgtm:4317`); sem ela, nada é exportado |
 
 ## Flags
@@ -185,7 +190,8 @@ No arquivo, as flags ficam na seção `Migracao`. O arquivo é observado e recar
         "KillSwitch": false,
         "Inclusao": ["10000001"],
         "Exclusao": [],
-        "Sombra": { "Amostragem": 0 }
+        "Sombra": { "Amostragem": 0 },
+        "RollbackAutomatico": { "Ligado": true, "Rearme": "" }
       }
     }
   }
@@ -193,7 +199,7 @@ No arquivo, as flags ficam na seção `Migracao`. O arquivo é observado e recar
 ```
 
 - Uma operação ausente fica em `legado`.
-- `Percentual` só vale em `novo`. `Sombra.Amostragem` vale em `sombra`, nas três operações, e em `novo` com `Sombra.Invertida` ([sombra invertida](#sombra-invertida-m3m4), só nas leituras).
+- `Percentual` só vale em `novo`. `Sombra.Amostragem` vale em `sombra`, nas três operações, e em `novo` com `Sombra.Invertida` ([sombra invertida](#sombra-invertida-m3m4), só nas leituras). `RollbackAutomatico` ausente fica desligado ([Rollback automático](#rollback-automático)).
 - `Sombra.Invertida` em `CancelarNfse` invalida o arquivo inteiro (fail-safe): seria escrita dupla.
 - As listas contêm IMs (ou documentos só com dígitos, em `ConsultarNfseServicoTomado`).
 - **Fail-safe:** com arquivo ausente, JSON inválido, valor que não converte (`"Modo": "talvez"`) ou percentual fora de 0..100, a fonte devolve `null`. Nesse caso tudo vai ao legado e `/health/ready` responde 503.
@@ -208,7 +214,7 @@ Com `Flags__Fonte=openfeature`, o mesmo retrato `FlagsDeMigracao` vem de flags O
 | --- | --- | --- |
 | `migracao.kill-switch` | booleano | `Migracao.KillSwitch` |
 | `<Operacao>.kill-switch` | booleano | `Operacoes.<Operacao>.KillSwitch` |
-| `<Operacao>.config` | objeto `{ Modo, Percentual, Inclusao, Exclusao, Sombra: { Amostragem, Invertida } }` | o resto de `Operacoes.<Operacao>` |
+| `<Operacao>.config` | objeto `{ Modo, Percentual, Inclusao, Exclusao, Sombra: { Amostragem, Invertida }, RollbackAutomatico: { Ligado, Rearme } }` | o resto de `Operacoes.<Operacao>` |
 
 `<Operacao>` é `ConsultarNfse`, `ConsultarNfseServicoTomado` ou `CancelarNfse`. Por que este esquema:
 
@@ -248,6 +254,28 @@ curl -X DELETE -H "X-Admin-Token: $TOKEN" http://fachada:8081/admin/kill-switch 
 curl           -H "X-Admin-Token: $TOKEN" http://fachada:8081/admin/kill-switch                       # estado
 ```
 
+## Rollback automático
+
+Implementa a [ADR-0014](../../docs/adr/0014-rollback-automatico-pela-fachada.md) ([`Rollback/`](Rollback)). Cada réplica observa o que já mede por requisição e, quando um gatilho do §9 do [plano](../../docs/plano-de-migracao.md) passa do limite, passa a mandar ao legado tudo o que a decisão mandaria ao novo naquela operação. Só um humano desarma, pela flag.
+
+| Gatilho | Dispara quando (padrões, todos [H]) |
+| --- | --- |
+| `fault` | com ≥ 100 requisições do novo na janela, o LI de Wilson da taxa de fault do novo passa o LS do legado + 0,1 p.p. |
+| `p99` | com ≥ 1.000 requisições em cada lado, o LI do p99 do novo passa 1,2 × o LS do p99 do legado |
+| `fallback` | com ≥ 100 tentativas no novo, o LI da fração que virou fallback passa 5% |
+| `regra_divergente` | na primeira resposta do novo com `X-Nfse-Dual-Run: divergente` (dual-run `nao_classificada` do `CancelarNfse`) |
+
+- **Janela:** 15 min em baldes de 1 min, por operação e lado, no `TimeProvider` injetado. O lado novo soma o que o novo atendeu e as tentativas que viraram fallback (com a duração até a falha). O lado legado soma o que o legado atendeu fora de fallback, em qualquer modo. Os limites usam z = 3,29 (99,9%), porque a regra é reavaliada a cada requisição. Latência em baldes geométricos de 5%, de 1 ms a 120 s.
+- **Sem legado na janela** (100% no novo): vale a linha de base do M0 em `RollbackAutomatico__Referencias__<Operacao>__TaxaDeFault` e `__P99`. Sem ela, `fault` e `p99` não são avaliados.
+- **Só na direção do legado:** o disparo é aplicado depois do `DecisorDeDestino` e só troca uma decisão `novo` por `legado` (motivo `RollbackAutomatico`). O kill switch vem antes e continua valendo; o modo `sombra` não é tocado, e a sombra continua copiando para o novo.
+- **Header do dual-run:** o novo o põe na resposta do `CancelarNfse` só quando o domínio discorda do PL/SQL sem explicação de relógio. A fachada lê e remove o header de toda resposta do novo; o ERP nunca o vê.
+- **Por réplica, em memória:** cada réplica dispara quando junta a própria evidência, sem coordenação, e o disparo se perde no restart. O disparo emite `rollback_automatico_ativo{operacao}=1` e um log `Critical` (evento 30): o alerta sobre essa métrica leva o plantão ao kill switch nível 1, que é global e durável.
+- **Ligar e desarmar, pela flag da operação:** `RollbackAutomatico: { "Ligado": true, "Rearme": "..." }`. O disparo guarda o `Rearme` do momento e vale enquanto ele não mudar. Para desarmar, troque o texto (ex.: `"2026-10-20-incidente-42"`) no mesmo PR que devolve a operação ao degrau anterior; a janela da operação recomeça vazia (evento 31). `Ligado: false` para de observar e não cria disparo novo, mas não desarma o que já disparou. Nenhum endpoint desarma.
+
+```bash
+curl -H "X-Admin-Token: $TOKEN" http://fachada:8081/admin/rollback-automatico   # estado desta réplica, só leitura
+```
+
 ## Observabilidade
 
 - Os logs são estruturados ([`Log.cs`](Observabilidade/Log.cs)) e trazem operação, destino, motivo, status e duração. Nunca trazem IM, documento ou corpo. Um nome de operação desconhecido aparece como `desconhecida`.
@@ -263,6 +291,8 @@ curl           -H "X-Admin-Token: $TOKEN" http://fachada:8081/admin/kill-switch 
 | `fachada_overhead` | `operacao` | tempo da requisição SOAP fora das chamadas aos destinos (orçamento da ADR-0008); inclui a leitura do corpo bufferizado |
 | `migracao_modo_info` (gauge) | `operacao`, `modo`, `percentual` | modo configurado por operação ([`MedidoresDeEstado`](Observabilidade/MedidoresDeEstado.cs)) |
 | `kill_switch_ativo` (gauge) | — | 1 se algum kill switch, do arquivo ou administrativo, está ligado |
+| `rollback_automatico_disparos_total` | `operacao`, `gatilho` (`fault`, `p99`, `fallback`, `regra_divergente`) | disparos do rollback automático desta réplica |
+| `rollback_automatico_ativo` (gauge) | `operacao` | 1 enquanto o disparo vale nesta réplica; alerta para aplicar o kill switch nível 1 |
 | `sombra_comparacoes_total` | `operacao`, `resultado` (`igual`, `divergente`) | comparações em bytes de corpo e status (leituras) ou o resultado da avaliação do novo (cancelamento) |
 | `sombra_divergencias_total` | `operacao`, `classe` | divergências e falhas do novo, por classe automática (no cancelamento, a devolvida pelo novo) |
 | `sombra_descartadas_total` | `operacao`, `motivo` | cópias amostradas e não comparadas (`canal_cheio`, `resposta_grande`, `requisicao_grande`, `falha_legado`, `novo_nao_configurado`, `sem_url_interna`; na sombra invertida, `falha_novo`, `erro_legado` e `invertida_proibida`) |
@@ -294,4 +324,6 @@ curl           -H "X-Admin-Token: $TOKEN" http://fachada:8081/admin/kill-switch 
 - [x] **Sombra invertida** das leituras em `novo` (ADR-0009, seção 7), proibida no cancelamento.
 - [x] **`soap_cnpj_inconsistente_total`** (ADR-0004, C18/K04), medida na sombra.
 - [ ] Timeout total (não só de inatividade) por operação no novo, se a medição do M0 mostrar necessidade.
+- [x] **Rollback automático** (ADR-0014): gatilhos `fault`, `p99`, `fallback` e `regra_divergente` por réplica, só na direção do legado, desarme pela troca de `RollbackAutomatico.Rearme`.
+- [ ] Drill do rollback automático no M1 (falha injetada no novo em canário; tempo até o disparo de cada réplica) e alerta sobre `rollback_automatico_ativo` no backend da plataforma.
 - [x] [Dockerfile](Dockerfile) e serviço `fachada` no [`docker-compose.yml`](../../docker-compose.yml), com as flags montadas de [`deploy/flags`](../../deploy/flags/flags.json).

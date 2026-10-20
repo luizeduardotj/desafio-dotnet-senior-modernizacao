@@ -14,7 +14,11 @@ public sealed record ResultadoDoGateway(
     DateTime? DataCancelamento);
 
 /// <summary>Resposta do caso de uso: a decisão e, quando a nota está cancelada, quando isso aconteceu.</summary>
-public sealed record RespostaDoCancelamento(DecisaoDeCancelamento Decisao, DateTime? DataCancelamento)
+/// <param name="RegraDivergente">
+/// O domínio discordou do PL/SQL sem explicação de relógio (dual-run, classe <c>nao_classificada</c>). Não muda o
+/// resultado; o adaptador SOAP sinaliza à fachada, que faz o rollback automático (ADR-0014).
+/// </param>
+public sealed record RespostaDoCancelamento(DecisaoDeCancelamento Decisao, DateTime? DataCancelamento, bool RegraDivergente = false)
 {
     public bool Cancelada => Decisao is DecisaoDeCancelamento.Permitido or DecisaoDeCancelamento.JaCancelada;
 }

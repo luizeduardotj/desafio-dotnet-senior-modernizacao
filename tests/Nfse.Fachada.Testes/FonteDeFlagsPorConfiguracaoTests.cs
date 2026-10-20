@@ -27,6 +27,20 @@ public sealed class FonteDeFlagsPorConfiguracaoTests : IDisposable
     }
 
     [Fact]
+    public void Le_o_rollback_automatico_da_operacao()
+    {
+        File.WriteAllText(Arquivo, """
+            { "Migracao": { "Operacoes": { "CancelarNfse": { "Modo": "novo", "RollbackAutomatico": { "Ligado": true, "Rearme": "r2" } } } } }
+            """);
+        FlagsDeMigracao? flags = Criar().Atual();
+
+        Assert.NotNull(flags);
+        Assert.True(flags.Da("CancelarNfse").RollbackAutomatico.Ligado);
+        Assert.Equal("r2", flags.Da("CancelarNfse").RollbackAutomatico.Rearme);
+        Assert.False(flags.Da("ConsultarNfse").RollbackAutomatico.Ligado);
+    }
+
+    [Fact]
     public async Task Recarrega_quando_o_arquivo_muda()
     {
         File.WriteAllText(Arquivo, Json("legado", 0));

@@ -69,6 +69,24 @@ public sealed class FlagsDaOperacao
 #pragma warning restore CA1819
 
     public FlagsDaSombra Sombra { get; set; } = new();
+
+    public FlagsDoRollbackAutomatico RollbackAutomatico { get; set; } = new();
+}
+
+/// <summary>Rollback automático da operação pela fachada (ADR-0014). Os limites ficam na seção <c>RollbackAutomatico</c>.</summary>
+public sealed class FlagsDoRollbackAutomatico
+{
+    /// <summary>
+    /// Observa a operação e dispara. Desligar não desarma um disparo que já aconteceu: só a troca de
+    /// <see cref="Rearme"/> devolve o tráfego ao novo.
+    /// </summary>
+    public bool Ligado { get; set; }
+
+    /// <summary>
+    /// Ficha do desarme: o disparo guarda o valor do momento e vale enquanto ele não mudar. Um humano desarma trocando o
+    /// texto (ex.: <c>2026-10-20-incidente-42</c>), no mesmo PR que devolve a operação ao degrau anterior.
+    /// </summary>
+    public string Rearme { get; set; } = "";
 }
 
 public sealed class FlagsDaSombra

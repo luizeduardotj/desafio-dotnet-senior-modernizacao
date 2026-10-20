@@ -53,6 +53,34 @@ public sealed class FonteDeFlagsOpenFeatureTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Le_o_rollback_automatico_da_operacao_e_ausente_fica_desligado()
+    {
+        var flags = Padrao();
+        flags["CancelarNfse.config"] = Config(Structure.Builder()
+            .Set("Modo", "novo").Set("Percentual", 5)
+            .Set("RollbackAutomatico", Structure.Builder().Set("Ligado", true).Set("Rearme", "2026-10-20-incidente-42").Build())
+            .Build());
+
+        FlagsDeMigracao? retrato = await LerAsync(new InMemoryProvider(flags));
+
+        Assert.NotNull(retrato);
+        Assert.True(retrato.Da("CancelarNfse").RollbackAutomatico.Ligado);
+        Assert.Equal("2026-10-20-incidente-42", retrato.Da("CancelarNfse").RollbackAutomatico.Rearme);
+        Assert.False(retrato.Da("ConsultarNfse").RollbackAutomatico.Ligado);
+        Assert.Equal("", retrato.Da("ConsultarNfse").RollbackAutomatico.Rearme);
+    }
+
+    [Fact]
+    public async Task Rollback_automatico_com_tipo_errado_invalida_o_retrato()
+    {
+        var flags = Padrao();
+        flags["CancelarNfse.config"] = Config(Structure.Builder()
+            .Set("Modo", "novo").Set("RollbackAutomatico", Structure.Builder().Set("Ligado", "sim").Build()).Build());
+
+        Assert.Null(await LerAsync(new InMemoryProvider(flags)));
+    }
+
+    [Fact]
     public async Task Le_os_kill_switches_global_e_da_operacao()
     {
         var flags = Padrao();

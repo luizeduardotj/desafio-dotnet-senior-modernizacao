@@ -19,6 +19,14 @@ public static partial class EndpointSoap
 {
     private const string Ns = "http://notacarioca.rio.gov.br/";
 
+    /// <summary>
+    /// Sinal interno para a fachada (ADR-0014): o dual-run do <c>CancelarNfse</c> deu <c>nao_classificada</c>. A
+    /// fachada lê, dispara o rollback automático e remove o header antes do ERP. Não leva dado do pedido.
+    /// </summary>
+    public const string HeaderDoDualRun = "X-Nfse-Dual-Run";
+
+    public const string DualRunDivergente = "divergente";
+
     public static IServiceCollection AdicionarAdaptadorSoap(this IServiceCollection services)
     {
         services.AddSingleton<ConsultarNfseSoap>();
@@ -64,7 +72,12 @@ public static partial class EndpointSoap
                 case "CancelarNfse":
                     // Sem CancellationToken da requisição: depois de chegar ao banco, o cancelamento termina e comita
                     // mesmo que o cliente desista, e o reenvio é idempotente (K01, ADR-0009).
-                    saida = await cancelarNfse.ExecutarAsync(entrada, CancellationToken.None).ConfigureAwait(false);
+                    (saida, bool regraDivergente) = await cancelarNfse.ExecutarAsync(entrada, CancellationToken.None).ConfigureAwait(false);
+                    if (regraDivergente)
+                    {
+                        ctx.Response.Headers[HeaderDoDualRun] = DualRunDivergente;
+                    }
+
                     break;
                 case "RecepcionarLoteRps":
                 case "ConsultarSituacaoLoteRps":

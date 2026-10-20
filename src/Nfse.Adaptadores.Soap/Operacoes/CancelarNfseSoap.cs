@@ -16,11 +16,12 @@ internal sealed class CancelarNfseSoap(CancelamentoDeNota cancelamento)
 {
     public const string Raiz = "CancelarNfseResposta";
 
-    public async Task<string> ExecutarAsync(string entrada, CancellationToken cancellationToken)
+    /// <returns>O <c>outputXML</c> e se o dual-run deu divergência <c>nao_classificada</c> (ADR-0014).</returns>
+    public async Task<(string Saida, bool RegraDivergente)> ExecutarAsync(string entrada, CancellationToken cancellationToken)
     {
         if (!PedidoDeCancelamentoSoap.TentarLer(entrada, out PedidoDeCancelamentoSoap? pedido))
         {
-            return SerializadorLegado.RespostaErro(Raiz, CatalogoDeRetornos.E001);
+            return (SerializadorLegado.RespostaErro(Raiz, CatalogoDeRetornos.E001), false);
         }
 
         Resultado<RespostaDoCancelamento> resultado = await cancelamento
@@ -28,17 +29,18 @@ internal sealed class CancelarNfseSoap(CancelamentoDeNota cancelamento)
 
         if (resultado.Erro is PrestadorNaoEncontrado)
         {
-            return SerializadorLegado.RespostaErro(Raiz, CatalogoDeRetornos.E010);
+            return (SerializadorLegado.RespostaErro(Raiz, CatalogoDeRetornos.E010), false);
         }
 
         RespostaDoCancelamento resposta = resultado.Valor;
         if (CodigoDeErro(resposta.Decisao) is { } codigo)
         {
-            return SerializadorLegado.RespostaErro(Raiz, codigo);
+            return (SerializadorLegado.RespostaErro(Raiz, codigo), resposta.RegraDivergente);
         }
 
         // K01: já cancelada devolve o DataHora original. K09: o instante vem da mesma transação do cancelamento.
-        return Confirmacao(pedido, resposta.DataCancelamento ?? throw new InvalidOperationException("Cancelamento sem DT_CANCELAMENTO."));
+        return (Confirmacao(pedido, resposta.DataCancelamento ?? throw new InvalidOperationException("Cancelamento sem DT_CANCELAMENTO.")),
+            resposta.RegraDivergente);
     }
 
     public static string? CodigoDeErro(DecisaoDeCancelamento decisao) => decisao switch

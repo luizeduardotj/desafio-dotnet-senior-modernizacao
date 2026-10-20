@@ -2,13 +2,16 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Options;
 using Nfse.Fachada.Configuracao;
+using Nfse.Fachada.Flags;
 using Nfse.Fachada.Observabilidade;
+using Nfse.Fachada.Rollback;
 using Nfse.Fachada.Roteamento;
 
 namespace Nfse.Fachada.Admin;
 
 /// <summary>
-/// <c>POST</c>/<c>DELETE /admin/kill-switch[?operacao=]</c> e <c>GET</c> do estado. Só respondem na porta interna
+/// <c>POST</c>/<c>DELETE /admin/kill-switch[?operacao=]</c>, <c>GET</c> do estado e <c>GET /admin/rollback-automatico</c>
+/// (ADR-0014, só leitura). Só respondem na porta interna
 /// (<c>Admin:Porta</c>, pelo roteamento) e com o header <see cref="HeaderDoToken"/> igual ao segredo <c>Admin:Token</c>.
 /// </summary>
 public static class EndpointsAdministrativos
@@ -20,6 +23,9 @@ public static class EndpointsAdministrativos
         RouteGroupBuilder admin = app.MapGroup("/admin").SomenteNaPorta(Plano.Admin).AddEndpointFilter(SomentePortaInternaComToken);
 
         admin.MapGet("/kill-switch", (KillSwitchAdministrativo kill) => Results.Ok(kill.Estado()));
+
+        // Só leitura: o rollback automático só se desarma pela troca de RollbackAutomatico.Rearme nas flags (ADR-0014).
+        admin.MapGet("/rollback-automatico", (RollbackAutomatico rollback, IFonteDeFlags flags) => Results.Ok(rollback.Estado(flags.Atual())));
         admin.MapPost("/kill-switch", (string? operacao, KillSwitchAdministrativo kill, ILogger<KillSwitchAdministrativo> logger) =>
             Alterar(operacao, ativar: true, kill, logger));
         admin.MapDelete("/kill-switch", (string? operacao, KillSwitchAdministrativo kill, ILogger<KillSwitchAdministrativo> logger) =>

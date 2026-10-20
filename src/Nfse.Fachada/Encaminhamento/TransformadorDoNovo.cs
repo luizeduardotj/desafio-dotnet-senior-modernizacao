@@ -13,7 +13,15 @@ namespace Nfse.Fachada.Encaminhamento;
 /// </remarks>
 internal sealed class TransformadorDoNovo(bool descartarIndisponibilidade) : HttpTransformer
 {
+    /// <summary>
+    /// Header interno do novo (<c>EndpointSoap.HeaderDoDualRun</c> em <c>Nfse.Adaptadores.Soap</c>): o dual-run do
+    /// cancelamento deu <c>nao_classificada</c>. Gatilho do rollback automático (ADR-0014); nunca chega ao ERP.
+    /// </summary>
+    public const string HeaderDoDualRun = "X-Nfse-Dual-Run";
+
     public int? StatusDescartado { get; private set; }
+
+    public bool RegraDivergente { get; private set; }
 
     public override ValueTask TransformRequestAsync(HttpContext httpContext, HttpRequestMessage proxyRequest, string destinationPrefix, CancellationToken cancellationToken) =>
         Default.TransformRequestAsync(httpContext, proxyRequest, destinationPrefix, cancellationToken);
@@ -26,7 +34,19 @@ internal sealed class TransformadorDoNovo(bool descartarIndisponibilidade) : Htt
             return ValueTask.FromResult(false);
         }
 
-        return Default.TransformResponseAsync(httpContext, proxyResponse, cancellationToken);
+        if (proxyResponse is not null && proxyResponse.Headers.TryGetValues(HeaderDoDualRun, out IEnumerable<string>? valores))
+        {
+            RegraDivergente = valores.Contains("divergente", StringComparer.Ordinal);
+        }
+
+        return CopiarSemOHeaderInternoAsync(httpContext, proxyResponse, cancellationToken);
+    }
+
+    private static async ValueTask<bool> CopiarSemOHeaderInternoAsync(HttpContext httpContext, HttpResponseMessage? proxyResponse, CancellationToken cancellationToken)
+    {
+        bool continuar = await Default.TransformResponseAsync(httpContext, proxyResponse, cancellationToken).ConfigureAwait(false);
+        httpContext.Response.Headers.Remove(HeaderDoDualRun);
+        return continuar;
     }
 
     internal static bool Indisponibilidade(int status) =>

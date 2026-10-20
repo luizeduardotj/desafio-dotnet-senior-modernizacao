@@ -38,11 +38,13 @@ As premissas começaram como leitura estática do código e do PL/SQL. O [spike 
 | [0011](0011-paridade-golden-master.md) | Golden master com `FIXED_DATE`, corpus por ID do catálogo, comparação em bytes | Aceito; em parte substituída pela 0013 |
 | [0012](0012-observabilidade-seguranca-e-lgpd.md) | OpenTelemetry, métricas que decidem fase, `otel-lgtm`; dados pessoais fora da telemetria | Aceito |
 | [0013](0013-paridade-como-implementada.md) | Paridade como implementada: um Oracle por job com ordem fixa, corpus em arquivos, snapshot do OpenAPI no lugar do oasdiff | Aceito |
+| [0014](0014-rollback-automatico-pela-fachada.md) | Rollback automático pela fachada: janela de 15 min com Wilson, dual-run por header, estado por réplica, desarme só pela flag e só na direção do legado | **Proposto** |
 
 ## Mapa das decisões
 
 ```
-0001 estratégia ──┬─► 0008 fachada ──► 0009 sombra / escrita única
+0001 estratégia ──┬─► 0008 fachada ──┬─► 0009 sombra / escrita única
+                  │                  └─► 0014 rollback automático
                   │
                   ├─► 0002 dados ──► 0003 PL/SQL ──► 0005 trigger (proposto)
                   │

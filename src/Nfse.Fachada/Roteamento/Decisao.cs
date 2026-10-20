@@ -22,6 +22,7 @@ public enum MotivoDeRoteamento
     NovoTotalSemChave,
     NovoNaoConfigurado,
     Fallback,
+    RollbackAutomatico,
 }
 
 /// <param name="Destino">Quem responde ao cliente.</param>

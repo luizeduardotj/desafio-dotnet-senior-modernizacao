@@ -198,15 +198,19 @@ O novo responde para uma fatia. Degraus **[H]**: **prestadores piloto** (lista d
 
 ### Gatilhos de rollback imediato (sem decisão humana)
 
-Hoje o alerta chama o plantão, que aplica o nível 1 do kill switch sem precisar decidir nada: o gatilho já é a decisão. A volta automática pela própria fachada fica para o M1. Já são automáticos o fail-safe da última linha e o abort do canário de versão pela análise do Argo Rollouts.
+A fachada avalia sozinha os gatilhos que dependem do que ela vê por requisição e, ao disparar, manda ao legado tudo o que iria ao novo naquela operação ([ADR-0014](adr/0014-rollback-automatico-pela-fachada.md)). Cada réplica decide com a própria janela, e o disparo não sobrevive a restart; por isso todo disparo também alerta o plantão, que aplica o nível 1 do kill switch (global e durável) sem precisar decidir nada: o gatilho já é a decisão. O mecanismo só vai na direção do legado, liga por operação (`RollbackAutomatico.Ligado` nas flags) e só um humano desarma, trocando `RollbackAutomatico.Rearme` no mesmo PR que devolve a operação ao degrau anterior. Também são automáticos o fail-safe da última linha e o abort do canário de versão pela análise do Argo Rollouts.
 
-| Gatilho | Fase |
-| --- | --- |
-| `cancelamento_regra_divergente_total` > 0 | M3, M4 (cancelamento) |
-| divergência `nao_classificada` > 0 no cancelamento | M2 → amostragem 0; M3 → `legado` |
-| p99 do novo > 1,2 × p99 do legado por 15 min | M3, M4 |
-| taxa de `fault` do novo > legado + 0,1 p.p. por 15 min | M3, M4 |
-| fachada sem conseguir avaliar flags | qualquer (fail-safe para `legado`) |
+| Gatilho | Fase | Quem age |
+| --- | --- | --- |
+| `cancelamento_regra_divergente_total` > 0 (classe `nao_classificada`) | M3, M4 (cancelamento) | **fachada**, na primeira resposta do novo com o header `X-Nfse-Dual-Run`; o alerta continua como reforço |
+| p99 do novo > 1,2 × p99 do legado na janela de 15 min | M3, M4 | **fachada**, com ≥ 1.000 requisições por lado e limites de confiança do quantil (z = 3,29) |
+| taxa de `fault` do novo > legado + 0,1 p.p. na janela de 15 min | M3, M4 | **fachada**, com ≥ 100 requisições do novo e Wilson (z = 3,29) |
+| fallback de leitura > 5% das tentativas no novo na janela de 15 min | M3, M4 | **fachada**, com ≥ 100 tentativas e Wilson (z = 3,29) |
+| divergência `nao_classificada` > 0 no cancelamento | M2 | alerta; o plantão decide entre amostragem 0 e manter para a triagem (o cliente já recebe o legado; ADR-0014, seção 6) |
+| `rollback_automatico_ativo` = 1 em qualquer réplica | M3, M4 | alerta; o plantão aplica o nível 1 para tornar o rollback global e durável |
+| fachada sem conseguir avaliar flags | qualquer | fachada (fail-safe para `legado`) |
+
+Em M4, sem legado na janela, os gatilhos de fault e p99 comparam com a linha de base do M0 (`RollbackAutomatico__Referencias__<Operacao>`); sem ela, só valem o dual-run, o fallback e o alerta.
 
 ### Gatilhos manuais (plantão decide)
 
