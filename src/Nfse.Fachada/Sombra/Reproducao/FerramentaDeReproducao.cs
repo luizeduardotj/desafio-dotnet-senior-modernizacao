@@ -34,14 +34,16 @@ public static class FerramentaDeReproducao
         saída: 0 igual, 1 divergente, 2 uso ou chave, 3 falha de rede
         """;
 
-    public static Task<int> ExecutarAsync(string[] args, TextWriter saida, CancellationToken ct)
+    public static async Task<int> ExecutarAsync(string[] args, TextWriter saida, CancellationToken ct)
     {
         IConfiguration ambiente = new ConfigurationBuilder().AddEnvironmentVariables().Build();
+        // await, e não return da Task: com return, o using descartaria o handler antes de a requisição sair.
         using var rede = new SocketsHttpHandler { UseProxy = false, AllowAutoRedirect = false };
-        return ExecutarAsync(args, ambiente, rede, saida, ct);
+        return await ExecutarAsync(args, ambiente, rede, saida, ct).ConfigureAwait(false);
     }
 
-    internal static async Task<int> ExecutarAsync(string[] args, IConfiguration configuracao, HttpMessageHandler rede, TextWriter saida, CancellationToken ct)
+    internal static async Task<int> ExecutarAsync(
+        string[] args, IConfiguration configuracao, HttpMessageHandler rede, TextWriter saida, CancellationToken ct, TimeProvider? relogio = null)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(saida);
@@ -80,7 +82,7 @@ public static class FerramentaDeReproducao
         try
         {
             return string.Equals(registro.Operacao, OperacoesSoap.CancelarNfse, StringComparison.Ordinal)
-                ? await ReavaliarCancelamentoAsync(cliente, registro, conteudo, opcoes, saida, ct).ConfigureAwait(false)
+                ? await ReavaliarCancelamentoAsync(cliente, registro, conteudo, opcoes, saida, relogio ?? TimeProvider.System, ct).ConfigureAwait(false)
                 : await ReexecutarLeituraAsync(cliente, conteudo, opcoes, saida, ct).ConfigureAwait(false);
         }
         catch (Exception erro) when (erro is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
@@ -154,7 +156,7 @@ public static class FerramentaDeReproducao
     /// </summary>
     private static async Task<int> ReavaliarCancelamentoAsync(
         HttpClient cliente, RegistroDeReproducao registro, ConteudoDeReproducao conteudo, Dictionary<string, string> opcoes, TextWriter saida,
-        CancellationToken ct)
+        TimeProvider relogio, CancellationToken ct)
     {
         if (!opcoes.TryGetValue("--novo-interno", out string? interno) || conteudo.Resposta is null)
         {
@@ -162,7 +164,9 @@ public static class FerramentaDeReproducao
             return Uso;
         }
 
-        long idadeMs = (long)(DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(registro.CriadoEmUnix)).TotalMilliseconds;
+        // Idade do registro pelo relógio de quem roda a ferramenta, fora do serviço: o novo reconstrói o T0 com o SYSDATE do
+        // banco menos essa idade (ADR-0009), então só um relógio muito adiantado ou atrasado aqui desloca a reavaliação.
+        long idadeMs = (long)(relogio.GetUtcNow() - DateTimeOffset.FromUnixTimeSeconds(registro.CriadoEmUnix)).TotalMilliseconds;
         var pedido = new
         {
             envelope = Encoding.UTF8.GetString(conteudo.Requisicao),
