@@ -117,6 +117,9 @@ Exemplo, com z = 3,29 e a referência do M0 em 0,1% de fault (limite de 0,2%): c
 
 ## Como verificar
 
+**Conferido no compose em 2026-10-20 [M]:** `ConsultarNfse` em `novo` 100% com o rollback ligado e o `nfse-novo` parado. O gatilho `fallback` disparou no 23º fallback, com 233 tentativas na janela (LI de Wilson 0,0512 > 0,05). As 107 requisições seguintes foram direto ao legado (motivo `RollbackAutomatico`), sem tentar o novo, e o cliente recebeu 200 em 130 de 130. Com o novo de volta, a operação continuou no legado; trocar o `Rearme` de `r1` para `r2` na flag a devolveu ao novo e zerou o estado. `rollback_automatico_disparos_total{gatilho="fallback"}` = 1.
+
+
 - Testes unitários da janela e da estatística, com relógio injetado: não dispara abaixo do mínimo de amostras; dispara no mínimo; a janela esquece depois de 15 min; Wilson confere com a tabela do §5.3 do plano.
 - Teste de propriedade da função de aplicação: para toda decisão, a saída só difere da entrada quando a entrada é `novo`, e a saída é sempre `legado`.
 - Testes de integração na fachada: faults do novo em canário disparam e a próxima requisição vai ao legado; header de dual-run dispara na primeira e não chega ao cliente; troca do `Rearme` desarma; `Ligado: false` não dispara; a sombra de uma operação continua copiando com outra operação disparada.

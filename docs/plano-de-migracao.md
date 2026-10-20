@@ -54,7 +54,7 @@ A fachada entra na frente do `/NfseWS.asmx` com **todas as operações em `legad
 | Tamanho do corpo (p99, máximo) | validar o limite de 1 MiB | [ADR-0008](adr/0008-fachada-yarp-roteamento-e-flags.md) |
 | Overhead da fachada (span fachada − span legado) | validar o orçamento de 5/10 ms | [ADR-0008](adr/0008-fachada-yarp-roteamento-e-flags.md) |
 | Requisições sem chave extraível | quantas ficariam presas no legado | [ADR-0008](adr/0008-fachada-yarp-roteamento-e-flags.md) |
-| `soap_cnpj_inconsistente_total` (**a implementar** na sombra antes do M0) | base para decidir C18/K04 | [ADR-0004](adr/0004-comportamentos-legados-nao-documentados.md) |
+| `soap_cnpj_inconsistente_total` / `soap_cnpj_conferido_total` (medida na sombra) | base para decidir C18/K04 | [ADR-0004](adr/0004-comportamentos-legados-nao-documentados.md) |
 | Concentração por prestador (top 1%) | escolher prestadores piloto e evitar que um prestador domine a amostra | §5.2, §6 |
 
 ### Premissas a confirmar no M0
