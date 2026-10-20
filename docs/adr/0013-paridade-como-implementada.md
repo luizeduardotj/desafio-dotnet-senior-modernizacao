@@ -15,12 +15,12 @@ A ADR-0011 foi escrita antes do código. Na implementação, quatro pontos saír
 Cada Oracle do compose leva ~2–3 GB e minutos para carregar o seed. Subir um por alvo dobraria o tempo do CI sem ganho: as leituras não escrevem. O job `compose` sobe **um** Oracle do zero e roda nesta ordem:
 
 1. paridade das leituras e da sombra do cancelamento (sem escrita);
-2. paridade do cancelamento com `FIXED_DATE`, num step próprio, que confere a linha de base antes e devolve `FIXED_DATE = NONE` ao sair;
+2. paridade do cancelamento com `FIXED_DATE` (respostas e estado de `NFSE`/`GUIAS`), num step próprio, que confere a linha de base antes e devolve `FIXED_DATE = NONE` ao sair;
 3. as leituras de novo, para provar que o cancelamento não afetou o que elas comparam.
 
-Antes de tudo, `tests/paridade/recapturar-leituras-legado.sh` recaptura as leituras direto no legado e falha se `git diff` em `tests/paridade/casos` não estiver vazio: o golden master ainda descreve o legado, não só o que o novo reproduz. Entre as leituras e o `FIXED_DATE` entram as garantias do banco: grants dos usuários do `NFSE_MODERNO` e K08 pelo wrapper, numa nota que nenhum caso do corpus usa.
+Antes de tudo, `tests/paridade/massa-de-teste.sh` insere a massa de C11, C13 e C15, e `tests/paridade/recapturar-leituras-legado.sh` recaptura as leituras direto no legado e falha se `git diff` em `tests/paridade/casos` não estiver vazio: o golden master ainda descreve o legado, não só o que o novo reproduz. Junto com as leituras entram os grants dos usuários do `NFSE_MODERNO`; depois do `FIXED_DATE`, o K08 pelo wrapper, numa nota que nenhum caso do corpus usa.
 
-Localmente, a linha de base é o volume `nfse-oracle-baseline` restaurado sobre o volume do compose ([tests/paridade/README.md](../../tests/paridade/README.md)).
+Localmente, a linha de base é o volume `nfse-oracle-baseline` restaurado sobre o volume do compose, mais a massa ([tests/paridade/README.md](../../tests/paridade/README.md)).
 
 ### 2. Corpus em arquivos simples, sem a biblioteca Verify
 
@@ -36,21 +36,22 @@ Cada caso em `tests/paridade/casos/NNN-.../` tem `operacao`, `entrada.xml`, `leg
 | --- | --- | --- |
 | `legado` | build `net48;net8.0` e testes do legado | — |
 | `moderno` | build com analyzers (warnings como erro), unitários, arquitetura, fachada, host; step próprio para os testes de contrato | — |
-| `compose` | build das imagens, `compose up --wait`, smoke, recaptura das leituras pelo legado, paridade das leituras e da sombra com os grants, K08 pelo wrapper, cancelamento com `FIXED_DATE`, leituras de novo | Oracle real do compose |
+| `compose` | build das imagens, `compose up --wait`, smoke, massa de teste, recaptura das leituras pelo legado, paridade das leituras e da sombra com os grants, cancelamento com `FIXED_DATE` (respostas e estado do banco), K08 pelo wrapper, leituras de novo | Oracle real do compose |
 | `manifests` | `kubeconform -strict` dos overlays `local` e `producao`, com os CRDs pelo catálogo datreeio | — |
 
-## O que a ADR-0011 previa e ainda não existe
+## O que a ADR-0011 previa e entrou depois
 
-A validação das respostas REST, a recaptura pelo legado e os testes de grants e de K08 entraram depois da primeira versão desta ADR, no mesmo dia. Falta:
+A validação das respostas REST, a recaptura pelo legado e os testes de grants e de K08 entraram depois da primeira versão desta ADR, no mesmo dia. Os quatro itens que ainda faltavam entraram em seguida:
 
-| Previsto na 0011 | Situação |
+| Previsto na 0011 | Como ficou |
 | --- | --- |
-| Snapshot de `NFSE`/`GUIAS` depois de cada cancelamento | não implementado; K08 tem teste automático, K07 só o spike |
-| Teste de guarda contra `DateTime.Now` no serviço novo | não implementado; a regra está no CLAUDE.md e na revisão |
-| "ID do catálogo sem caso falha o build" | não implementado; C13 e C15 não têm caso por falta de massa no seed |
-| Testes de propriedade (período, cursor, documentos) | não implementados; período e cursor têm testes de exemplo nos limites |
+| Snapshot de `NFSE`/`GUIAS` depois de cada cancelamento | `legado.estado` em cada caso `2xx`, capturado do legado com `ESTADO=1 capturar.sh`; o `ParidadeCancelamentoTests` lê o mesmo SQL ([`estado-depois-do-cancelamento.sql`](../../tests/paridade/estado-depois-do-cancelamento.sql)) pelas views e compara. Datas relativas à competência, para não depender do mês da carga. Cobre K07; o K08 continua no `GarantiaK08Tests`, que passou para depois do `FIXED_DATE` |
+| Teste de guarda contra `DateTime.Now` no serviço novo | `RelogioDoBancoTests` lê o IL de todo assembly `src/Nfse.*` com `System.Reflection.Metadata` e falha em `DateTime.Now`/`UtcNow`/`Today`, `DateTimeOffset.Now`/`UtcNow` e em `SYSTIMESTAMP`/`CURRENT_DATE` em literais. Lista de exceções vazia: não havia uso |
+| "ID do catálogo sem caso falha o build" | `CoberturaDoCatalogoTests`, no job `moderno`: cada ID da ADR-0004 está na `descricao` de um caso ou em [`catalogo-sem-caso`](../../tests/paridade/catalogo-sem-caso), com o motivo (C14, C21, C22, K08, K09) |
+| C13 e C15 sem caso por falta de massa no seed | [`massa/c11-c13-c15.sql`](../../tests/paridade/massa/c11-c13-c15.sql): prestador 31 e cinco notas, só `INSERT` de linhas que nenhum outro caso lê, aplicado depois do `compose up`. Casos `026`–`028` e `111`–`112` capturados do legado; `112` é divergência esperada (C15 corrigido) |
+| Testes de propriedade (período, cursor, documentos) | CsCheck: período inclusivo de 1 a 31 dias, CPF/CNPJ com zeros preservados, cursor da REST sem repetir nem perder nota em massas falsas com emissões empatadas |
 
-Cada item está em "O que eu faria com mais tempo" no [README](../../README.md).
+Do desenho da 0011 ficam de fora só o isolamento por alvo e o oasdiff, substituídos pelas decisões 1 e 3.
 
 ## Alternativas consideradas
 

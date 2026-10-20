@@ -4,4 +4,8 @@
     <ProjectReference Include="../../src/Nfse.Dominio/Nfse.Dominio.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="CsCheck" />
+  </ItemGroup>
+
 </Project>

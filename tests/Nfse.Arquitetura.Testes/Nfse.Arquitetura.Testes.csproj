@@ -9,4 +9,10 @@
     <ProjectReference Include="../../src/Nfse.Aplicacao/Nfse.Aplicacao.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- RelogioDoBancoTests lê o IL de todos os assemblies src/Nfse.*: o Host traz os do serviço novo; a fachada vem à parte. -->
+    <ProjectReference Include="../../src/Nfse.Host/Nfse.Host.csproj" />
+    <ProjectReference Include="../../src/Nfse.Fachada/Nfse.Fachada.csproj" />
+  </ItemGroup>
+
 </Project>

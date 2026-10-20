@@ -1,1 +1,1 @@
-sucesso; muda o estado
+sucesso; muda o estado; K10: ecoa Numero, Cnpj, InscricaoMunicipal e CodigoCancelamento do pedido, sem protocolo; K07: a guia recalculada não desconta a nota cancelada (legado.estado)

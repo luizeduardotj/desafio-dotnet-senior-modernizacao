@@ -49,6 +49,9 @@ jobs:
         run: docker compose up -d --wait --wait-timeout 1800
       - name: Smoke test (health e ConsultarNfse igual ao legado)
         run: tools/smoke-compose.sh
+      - name: Massa de teste da paridade (C11, C13, C15; só INSERT de linhas novas, idempotente)
+        # Prestador 31 e cinco notas que nenhum outro caso lê (tests/paridade/massa); a linha de base é seed + massa.
+        run: tests/paridade/massa-de-teste.sh
       - name: Golden master ainda descreve o legado (leituras recapturadas direto no legado, git diff vazio)
         # Antes de qualquer escrita no banco. Os casos 2xx mudam o estado e ficam com o step do FIXED_DATE.
         run: tests/paridade/recapturar-leituras-legado.sh
@@ -60,18 +63,19 @@ jobs:
           NFSE_PARIDADE_ORACLE: "User Id=NFSE_MODERNO_APP;Password=moderno_app_dev_123;Data Source=127.0.0.1:1521/FREEPDB1"
           NFSE_PARIDADE_ORACLE_RO: "User Id=NFSE_MODERNO_RO;Password=moderno_ro_dev_123;Data Source=127.0.0.1:1521/FREEPDB1"
         run: dotnet test tests/Nfse.Paridade.Testes -c Release
-      - name: K08 corrigido pelo wrapper (dois cancelamentos paralelos, um UPDATE)
-        # Escreve: cancela a nota 27/5, que nenhum caso do corpus usa, com o relógio real (prazo aberto no mês da carga).
-        env:
-          NFSE_PARIDADE_ORACLE: "User Id=NFSE_MODERNO_APP;Password=moderno_app_dev_123;Data Source=127.0.0.1:1521/FREEPDB1"
-          NFSE_PARIDADE_K08: "1"
-        run: dotnet test tests/Nfse.Paridade.Testes -c Release --no-build --filter "FullyQualifiedName~Nfse.Paridade.Testes.GarantiaK08Tests"
       - name: Paridade do cancelamento (FIXED_DATE)
         # Cancela notas do seed: roda depois das leituras, que não veem o banco alterado; o job termina com down -v.
         # O script congela o SYSDATE como SYS no PDB e devolve FIXED_DATE = NONE ao sair, passe ou falhe.
         env:
           NFSE_PARIDADE_ORACLE: "User Id=NFSE_MODERNO_APP;Password=moderno_app_dev_123;Data Source=127.0.0.1:1521/FREEPDB1"
         run: tests/paridade/cancelamento-fixed-date.sh
+      - name: K08 corrigido pelo wrapper (dois cancelamentos paralelos, um UPDATE)
+        # Escreve: cancela a nota 27/5, que nenhum caso do corpus usa, com o relógio real (prazo aberto no mês da carga).
+        # Depois do cancelamento com FIXED_DATE: o snapshot do caso 209 (prestador 27) foi capturado sem este cancelamento.
+        env:
+          NFSE_PARIDADE_ORACLE: "User Id=NFSE_MODERNO_APP;Password=moderno_app_dev_123;Data Source=127.0.0.1:1521/FREEPDB1"
+          NFSE_PARIDADE_K08: "1"
+        run: dotnet test tests/Nfse.Paridade.Testes -c Release --no-build --filter "FullyQualifiedName~Nfse.Paridade.Testes.GarantiaK08Tests"
       - name: Leituras conferidas de novo (as escritas acima não mudaram o golden master)
         env:
           NFSE_PARIDADE_ORACLE: "User Id=NFSE_MODERNO_APP;Password=moderno_app_dev_123;Data Source=127.0.0.1:1521/FREEPDB1"

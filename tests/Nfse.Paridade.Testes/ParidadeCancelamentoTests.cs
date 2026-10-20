@@ -1,13 +1,17 @@
 using System.Globalization;
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
+using Oracle.ManagedDataAccess.Client;
 
 namespace Nfse.Paridade.Testes;
 
 /// <summary>
 /// Golden master do <c>CancelarNfse</c> (ADR-0011). Muda o estado do banco: exige a linha de base restaurada,
 /// <c>FIXED_DATE = '2026-10-09-15:00:00'</c> e roda os casos na ordem dos nomes, uma única vez. Por isso só roda com
-/// <c>NFSE_PARIDADE_CANCELAMENTO=1</c> além da connection string.
+/// <c>NFSE_PARIDADE_CANCELAMENTO=1</c> além da connection string. Depois de cada caso, o estado de <c>NFSE</c> e
+/// <c>GUIAS</c> da competência da nota pedida também tem de ser igual ao que o legado deixou (<c>legado.estado</c>):
+/// cobre K07 e qualquer escrita fora do lugar.
 /// </summary>
 public sealed class ParidadeCancelamentoTests : IClassFixture<ParidadeLeiturasTests.Fabrica>
 {
@@ -34,6 +38,20 @@ public sealed class ParidadeCancelamentoTests : IClassFixture<ParidadeLeiturasTe
             (HttpStatusCode status, string corpo) = await Corpus.EnviarAsync(_fabrica.CreateClient(), "CancelarNfse", pasta);
             string esperado = File.ReadAllText(Path.Combine(pasta, "legado.xml"));
             var statusEsperado = (HttpStatusCode)int.Parse(File.ReadAllText(Path.Combine(pasta, "legado.status")).Trim(), CultureInfo.InvariantCulture);
+
+            string estadoEsperado = Path.Combine(pasta, "legado.estado");
+            if (File.Exists(estadoEsperado))
+            {
+                string estado = await EstadoDoBanco.LerAsync(pasta);
+                if (estado != File.ReadAllText(estadoEsperado).TrimEnd('\n'))
+                {
+                    divergencias.Add($"{caso}: estado de NFSE/GUIAS\n  legado: {File.ReadAllText(estadoEsperado)}\n  novo:   {estado}");
+                }
+            }
+            else
+            {
+                divergencias.Add($"{caso}: sem legado.estado (capture com ESTADO=1, tests/paridade/README.md)");
+            }
 
             if (caso == CasoDoFault)
             {
@@ -66,6 +84,39 @@ public sealed class ParidadeCancelamentoFactAttribute : FactAttribute
         {
             Skip = "muda o banco: defina NFSE_PARIDADE_CANCELAMENTO=1 sobre a linha de base com FIXED_DATE (tests/paridade/README.md)";
         }
+    }
+}
+
+/// <summary>Snapshot de <c>tests/paridade/estado-depois-do-cancelamento.sql</c>, o mesmo que o <c>estado-do-banco.sh</c> captura do legado.</summary>
+internal static partial class EstadoDoBanco
+{
+    [GeneratedRegex("<InscricaoMunicipal>([^<]*)</InscricaoMunicipal>")]
+    private static partial Regex Inscricao();
+
+    [GeneratedRegex("<Numero>([0-9]+)</Numero>")]
+    private static partial Regex Numero();
+
+    public static async Task<string> LerAsync(string pasta)
+    {
+        string entrada = File.ReadAllText(Path.Combine(pasta, "entrada.xml"));
+        string sql = File.ReadAllText(Path.Combine(Corpus.Raiz(), "tests", "paridade", "estado-depois-do-cancelamento.sql"));
+        Match numero = Numero().Match(entrada);
+
+        await using var conexao = new OracleConnection(Environment.GetEnvironmentVariable(ParidadeTheoryAttribute.Variavel));
+        await conexao.OpenAsync();
+        await using var comando = new OracleCommand(sql, conexao) { BindByName = true };
+        comando.Parameters.Add("im", OracleDbType.Varchar2).Value = Inscricao().Match(entrada).Groups[1].Value;
+        comando.Parameters.Add("numero", OracleDbType.Int64).Value =
+            numero.Success ? long.Parse(numero.Groups[1].Value, CultureInfo.InvariantCulture) : DBNull.Value;
+
+        var linhas = new List<string>();
+        await using OracleDataReader leitor = await comando.ExecuteReaderAsync();
+        while (await leitor.ReadAsync())
+        {
+            linhas.Add(leitor.GetString(0));
+        }
+
+        return string.Join('\n', linhas);
     }
 }
 

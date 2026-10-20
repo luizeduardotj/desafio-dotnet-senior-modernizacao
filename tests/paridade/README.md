@@ -9,13 +9,21 @@ Cada pasta em `casos/` tem:
 | `entrada.xml` | XML de negócio que vai escapado dentro de `inputXML` |
 | `descricao` | o que o caso prova, com o ID do catálogo ([ADR-0004](../../docs/adr/0004-comportamentos-legados-nao-documentados.md)) |
 | `legado.xml`, `legado.status` | resposta aprovada do legado (corpo HTTP e status) |
+| `legado.estado` | só nos `2xx`: `NFSE` e `GUIAS` da competência da nota pedida depois do caso, no legado ([`estado-depois-do-cancelamento.sql`](estado-depois-do-cancelamento.sql)) |
+
+Todo ID do catálogo (C01–C29, K01–K11) aparece na `descricao` de algum caso ou em [`catalogo-sem-caso`](catalogo-sem-caso), com o motivo e onde está coberto; `CoberturaDoCatalogoTests` falha o build se não (roda no job `moderno`, sem Oracle).
+
+## Massa de teste
+
+O seed do legado não exercita C11 (prestador pessoa física), C13 (competência posterior à emissão) nem C15 (CPF e CNPJ de mesmo valor numérico). [`massa/c11-c13-c15.sql`](massa/c11-c13-c15.sql) insere o prestador 31 (CPF, IM `10000031`) e cinco notas com chaves fixas, sem alterar tabela nem `db/0*`: notas 1–3 em agosto para um tomador novo, a 2 com competência 09/2026; notas 4–5 em julho para o CNPJ `00074579869109`, que como número é igual ao CPF válido `74579869109`, sem nota nenhuma. Nenhum outro caso lê esse prestador nem esses tomadores, e `INSERT` não dispara o trigger da guia: contagens, paginação e guias dos casos existentes não mudam (a recaptura do CI confere). `massa-de-teste.sh` aplica como SYS no `FREEPDB1`, é idempotente e entra logo depois do `compose up`: a linha de base da paridade é **seed + massa**.
 
 O serviço novo é comparado contra `legado.xml` byte a byte pelos testes de `tests/Nfse.Paridade.Testes`:
 
 | Teste | Casos | Pré-condição |
 | --- | --- | --- |
 | `ParidadeLeiturasTests` | `0xx` e `1xx` (ConsultarNfse e ServicoTomado) | `NFSE_PARIDADE_ORACLE` com a connection string do `NFSE_MODERNO_APP`; não depende do relógio nem dos cancelamentos |
-| `ParidadeCancelamentoTests` | `2xx`, na ordem | linha de base restaurada, `db/moderno` aplicado, `FIXED_DATE` e `NFSE_PARIDADE_CANCELAMENTO=1`; muda o banco, roda uma vez |
+| `ParidadeCancelamentoTests` | `2xx`, na ordem, resposta **e** `legado.estado` | linha de base restaurada, `db/moderno` aplicado, `FIXED_DATE` e `NFSE_PARIDADE_CANCELAMENTO=1`; muda o banco, roda uma vez |
+| `CoberturaDoCatalogoTests` | todos (só `descricao`) | nenhuma |
 | `GarantiasDeGrantsTests` | — (grants do `NFSE_MODERNO`) | `NFSE_PARIDADE_ORACLE` e/ou `NFSE_PARIDADE_ORACLE_RO`; cada teste roda com o usuário que confere; não escreve |
 | `GarantiaK08Tests` | — (K08 pelo wrapper) | `NFSE_PARIDADE_ORACLE` e `NFSE_PARIDADE_K08=1`; cancela a nota 27/5, roda uma vez por banco na linha de base |
 
@@ -40,27 +48,31 @@ Os códigos variam entre o 23ai do compose e o 19c de produção; os testes acei
 
 O K08 escreve. Usa a nota **27/5**: nenhum caso do corpus a usa (o cancelamento mexe em 25/1 e 25/2; 27/2 só aparece no K11, que falha sem gravar), o tomador dela não aparece nas consultas por tomador e a competência é a do mês da carga, com o prazo aberto pelo relógio real, sem `FIXED_DATE`. A sessão A cancela e segura o lock por 3 s; a B chama durante esse tempo. Se B gravasse de novo, o `SYSDATE` dela ficaria ao menos 3 s à frente no `DT_CANCELAMENTO` e no `DT_ATUALIZACAO` da guia. O `VALOR_ISS` da guia fica igual ao de antes porque o trigger autônomo não vê a nota cancelada (K07, preservado na migração). Para repetir localmente, restaure a linha de base.
 
-Divergências esperadas, por decisão do catálogo: `023` (C28, DTD recusada) e `209` (K11 com C20: Fault sem a mensagem do Oracle).
+Divergências esperadas, por decisão do catálogo: `023` (C28, DTD recusada), `112` (C15: o legado devolve ao CPF as notas do CNPJ de mesmo número, o novo responde E040) e `209` (K11 com C20: Fault sem a mensagem do Oracle).
+
+## Estado do banco depois do cancelamento
+
+Cada `2xx` compara também `NFSE` e `GUIAS` da competência da nota pedida com `legado.estado`. O snapshot é um único SQL ([`estado-depois-do-cancelamento.sql`](estado-depois-do-cancelamento.sql)) lido dos dois lados: pelo `estado-do-banco.sh` (sqlplus como SYS) na captura do legado e pelo teste (ODP.NET com o `NFSE_MODERNO_APP`, só as views). Para não depender do mês da carga do seed, as datas saem relativas ao início da competência, e o que o próprio caso gravou sai como `agora` (o `SYSDATE` congelado); o `DT_ATUALIZACAO` da guia vira `agora`/`antes`. O `210` mostra o K07: a nota 1 do prestador 25 fica `C` e a guia é atualizada `agora` com o mesmo `VALOR_ISS`.
 
 `capturar.sh novo <url>` também grava `novo.xml` ao lado, para inspeção manual.
 
 ## No CI
 
-O job `compose` sobe o banco do zero e, depois do smoke, roda nesta ordem:
+O job `compose` sobe o banco do zero, aplica a massa (`massa-de-teste.sh`) e, depois do smoke, roda nesta ordem:
 
 1. **Golden master ainda descreve o legado**: `recapturar-leituras-legado.sh`, antes de qualquer escrita.
 2. **Paridade e garantias do banco**: leituras, sombra do cancelamento e grants, sem `FIXED_DATE`. Nenhum deles escreve; o cancelamento e o K08 ficam em skip porque `NFSE_PARIDADE_CANCELAMENTO` e `NFSE_PARIDADE_K08` não estão definidas.
-3. **K08 corrigido pelo wrapper**: só o `GarantiaK08Tests`, com `NFSE_PARIDADE_K08=1`. Cancela a nota 27/5.
-4. **Paridade do cancelamento (FIXED_DATE)**: `cancelamento-fixed-date.sh`. Último step que escreve; o `down -v` do fim descarta o banco.
+3. **Paridade do cancelamento (FIXED_DATE)**: `cancelamento-fixed-date.sh`, respostas e estado do banco.
+4. **K08 corrigido pelo wrapper**: só o `GarantiaK08Tests`, com `NFSE_PARIDADE_K08=1`. Cancela a nota 27/5. Vem depois do 3 porque o `legado.estado` do `209` (prestador 27) foi capturado sem esse cancelamento. Último step que escreve; o `down -v` do fim descarta o banco.
 5. **Leituras conferidas de novo**: só o `ParidadeLeiturasTests`, para provar que as escritas dos steps 3 e 4 não tocam o golden master das leituras.
 
 No CI o seed carrega com o relógio real, e o `FIXED_DATE` só entra depois. Isso não muda o resultado dos casos `2xx`. As notas dos prestadores 1 a 24 têm datas fixas (julho a outubro de 2026). Os prestadores 25 a 27 ficam na competência do mês da carga, que nunca é anterior a outubro de 2026, então o prazo continua aberto em 09/10/2026. O mês da competência também não aparece na resposta do `CancelarNfse`, e o `DataHora` é o `SYSDATE` congelado.
 
 ## Como capturar de forma reproduzível
 
-1. Banco no estado da linha de base: seed `01`–`06` recém-carregado (volume `nfse-oracle-baseline`, ver abaixo).
+1. Banco no estado da linha de base: seed `01`–`06` recém-carregado (volume `nfse-oracle-baseline`, ver abaixo) e `massa-de-teste.sh` aplicado.
 2. Relógio congelado, como SYS no PDB: `ALTER SYSTEM SET FIXED_DATE = '2026-10-09-15:00:00';`
-3. `tests/paridade/capturar.sh legado`. Os casos `2xx` (cancelamento) mudam o estado: rodam por último, na ordem dos nomes.
+3. `ESTADO=1 tests/paridade/capturar.sh legado <url do legado>`. Os casos `2xx` (cancelamento) mudam o estado: rodam por último, na ordem dos nomes, e cada um grava também `legado.estado`.
 4. Restaurar a linha de base antes de capturar outro alvo.
 
 Restauração da linha de base (com o compose parado):
@@ -71,6 +83,6 @@ docker run --rm -v nfse-oracle-baseline:/de:ro -v desafio-dotnet-senior-moderniz
 
 ## Fora do corpus por ora
 
-- C13 (`COMPETENCIA <= fim`) e C15 (colisão CPF × CNPJ numérico): o seed não tem dados que os exercitem; precisam de massa própria.
+- Os IDs de [`catalogo-sem-caso`](catalogo-sem-caso) (C14, C21, C22, K08, K09), cada um com o motivo e o teste que o cobre fora do corpus.
 - C20 por erro interno arbitrário: coberto só pelo K11 (209), que provoca `ORA-12899`.
 - Emissão por lote: não determinística (`DBMS_RANDOM`, `DateTime.Now`) e fora do escopo.

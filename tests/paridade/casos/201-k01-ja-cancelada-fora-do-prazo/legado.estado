@@ -1,0 +1,6 @@
+nfse 1 situacao=C emissao=C+21d 09:33:00 servicos=6419.13 iss=192.57 retido=N cancelamento=C+23d 12:33:00 motivo=Cancelamento a pedido do tomador substituidora=-
+nfse 2 situacao=N emissao=C+1d 10:46:00 servicos=14338.26 iss=430.15 retido=N cancelamento=- motivo=- substituidora=-
+nfse 3 situacao=N emissao=C+8d 11:59:00 servicos=7257.39 iss=217.72 retido=N cancelamento=- motivo=- substituidora=-
+nfse 4 situacao=N emissao=C+15d 12:12:00 servicos=15176.52 iss=758.83 retido=S cancelamento=- motivo=- substituidora=-
+nfse 5 situacao=N emissao=C+22d 13:25:00 servicos=8095.65 iss=255.01 retido=N cancelamento=- motivo=- substituidora=-
+guia valor_iss=902.88 situacao=A atualizada=antes

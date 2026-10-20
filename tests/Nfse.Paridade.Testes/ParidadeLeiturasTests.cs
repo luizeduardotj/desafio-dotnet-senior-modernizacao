@@ -11,10 +11,14 @@ namespace Nfse.Paridade.Testes;
 /// </summary>
 public sealed class ParidadeLeiturasTests : IClassFixture<ParidadeLeiturasTests.Fabrica>
 {
-    // Divergências esperadas: decisão consciente, com o ID do catálogo (ADR-0004).
-    private static readonly Dictionary<string, string> Esperadas = new(StringComparer.Ordinal)
+    // Divergências esperadas: decisão consciente, com o ID do catálogo (ADR-0004). O legado continua no golden master;
+    // o que o novo responde no lugar é conferido aqui, com o que prova que o legado tinha o defeito.
+    private static readonly Dictionary<string, (string Motivo, string NoLegado, string NoNovo)> Esperadas = new(StringComparer.Ordinal)
     {
-        ["023-c28-dtd-interna"] = "C28: o legado expande a DTD interna; o novo recusa e responde E001",
+        ["023-c28-dtd-interna"] = ("C28: o legado expande a DTD interna; o novo recusa e responde E001",
+            "&lt;CompNfse&gt;", "&lt;Codigo&gt;E001&lt;/Codigo&gt;"),
+        ["112-c15-colisao-cpf-cnpj"] = ("C15: o legado devolve ao CPF as notas do CNPJ de mesmo número; o novo compara texto e responde E040",
+            "&lt;Cnpj&gt;74579869109&lt;/Cnpj&gt;", "&lt;Codigo&gt;E040&lt;/Codigo&gt;"),
     };
 
     private readonly Fabrica _fabrica;
@@ -58,10 +62,12 @@ public sealed class ParidadeLeiturasTests : IClassFixture<ParidadeLeiturasTests.
         using HttpResponseMessage resposta = await _fabrica.CreateClient().SendAsync(pedido);
         string obtido = await resposta.Content.ReadAsStringAsync();
 
-        if (Esperadas.TryGetValue(caso, out string? motivo))
+        if (Esperadas.TryGetValue(caso, out var divergencia))
         {
             Assert.NotEqual(esperado, obtido);
-            Assert.Contains("&lt;Codigo&gt;E001&lt;/Codigo&gt;", obtido, StringComparison.Ordinal);
+            Assert.True(esperado.Contains(divergencia.NoLegado, StringComparison.Ordinal), $"{divergencia.Motivo}: legado.xml sem {divergencia.NoLegado}");
+            Assert.True(obtido.Contains(divergencia.NoNovo, StringComparison.Ordinal), $"{divergencia.Motivo}: o novo respondeu {obtido}");
+            Assert.DoesNotContain(divergencia.NoLegado, obtido, StringComparison.Ordinal);
             return;
         }
 

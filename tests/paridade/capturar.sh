@@ -5,11 +5,14 @@
 # banco: rode sempre sobre um banco recém-restaurado e na ordem dos nomes.
 # CASOS limita os casos por prefixo (ex.: CASOS='0 1' só as leituras). CURL troca o curl do host por outro comando
 # compatível, ex.: um container na rede do compose para falar direto com o legado (recapturar-leituras-legado.sh).
+# ESTADO=1 grava também <alvo>.estado depois de cada caso CancelarNfse: o snapshot de NFSE/GUIAS da competência da
+# nota pedida (estado-do-banco.sh), que o ParidadeCancelamentoTests compara com legado.estado.
 set -euo pipefail
 cd "$(dirname "$0")"
 ALVO="${1:?alvo: legado ou novo}"
 URL="${2:-http://127.0.0.1:8080/NfseWS.asmx}"
 CASOS="${CASOS:-}"
+ESTADO="${ESTADO:-}"
 # shellcheck disable=SC2206
 CURL=(${CURL:-curl})
 
@@ -35,5 +38,10 @@ for caso in casos/*/; do
   status="${resposta##*$'\n'}"
   printf '%s' "${resposta%$'\n'*}" > "$caso/$ALVO.xml"
   echo "$status" > "$caso/$ALVO.status"
+  if [ "$ESTADO" = 1 ] && [ "$op" = CancelarNfse ]; then
+    im="$(sed -n 's:.*<InscricaoMunicipal>\([^<]*\)</InscricaoMunicipal>.*:\1:p' "$caso/entrada.xml")"
+    numero="$(sed -n 's:.*<Numero>\([^<]*\)</Numero>.*:\1:p' "$caso/entrada.xml")"
+    ./estado-do-banco.sh "$im" "$numero" > "$caso/$ALVO.estado"
+  fi
   printf '%-55s %s\n' "$(basename "$caso")" "$status"
 done

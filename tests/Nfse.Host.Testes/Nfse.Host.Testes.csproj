@@ -3,6 +3,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="NJsonSchema" />
+    <PackageReference Include="CsCheck" />
   </ItemGroup>
 
   <ItemGroup>

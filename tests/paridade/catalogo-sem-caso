@@ -1,0 +1,8 @@
+# IDs do catálogo da ADR-0004 sem caso no corpus (tests/paridade/casos), cada um com o motivo e onde está coberto.
+# CoberturaDoCatalogoTests falha se um ID do catálogo não tiver caso nem linha aqui, se uma linha não tiver motivo
+# e se um ID daqui ganhar caso (a linha fica obsoleta e sai). Formato: ID, espaço, motivo; '#' comenta.
+C14 DataEmissao é o SYSDATE do processamento do lote: emissão fica fora do corpus (DBMS_RANDOM e DateTime.Now no lote, ADR-0011); as leituras só devolvem a DT_EMISSAO gravada, conferida em todo caso de consulta
+C21 o envelope de capturar.sh usa sempre o elemento igual ao SOAPAction; despacho só pelo header na fachada, em OperacoesSoapTests e ExtratorDeChaveTests (C21_*)
+C22 o envelope do corpus tem um único inputXML no namespace do serviço; primeiro inputXML em qualquer namespace na fachada, em ExtratorDeChaveTests (C22_*)
+K08 concorrência não cabe num corpus sequencial; GarantiaK08Tests cancela a nota 27/5 em duas sessões paralelas pelo wrapper, no mesmo job compose
+K09 exige derrubar a conexão entre o COMMIT e a releitura do legado; o caminho novo não tem releitura (o wrapper devolve DT_CANCELAMENTO na mesma transação, ADR-0003)
