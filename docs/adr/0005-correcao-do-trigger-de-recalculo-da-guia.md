@@ -1,7 +1,7 @@
 # ADR-0005 — Correção do trigger de recálculo da guia
 
 - **Status:** **Proposto** (aplicação depende de aprovação da área de negócio/Fazenda; não faz parte do caminho crítico da migração)
-- **Data:** 2026-10-16
+- **Data:** 2026-10-16 (scripts e teste da proposta em 2026-10-19)
 - **Relacionados:** [0003](0003-regras-de-cancelamento-em-plsql.md), [0004](0004-comportamentos-legados-nao-documentados.md) (K07)
 
 ## Contexto
@@ -36,55 +36,37 @@ Restrições: mudanças no legado devem ser mínimas, justificadas em ADR e comp
 | # | Premissa | Fonte | Nível | Como confirmar | Se for falsa |
 | --- | --- | --- | --- | --- | --- |
 | P1 | O defeito existe (premissa P2 da ADR-0003) | inferência | **confirmada em execução** ([spike](../spikes/2026-10-19-premissas-oracle.md)) | teste K07 | esta ADR é arquivada |
-| P2 | Consultar `NFSE` no `AFTER STATEMENT` de um compound trigger não dispara `ORA-04091` | documentação Oracle 11g+ | lida | teste de integração do novo trigger | usar tabela temporária global como alternativa |
-| P3 | Segurar o lock de `GUIAS` até o commit não causa deadlock com o lote | — | hipótese | teste de carga lote + cancelamento na mesma competência | ordenar as operações ou manter o recálculo do lote fora da transação |
-| P4 | Não há notas com `COMPETENCIA` nula em produção | coluna nullable em `db/01_schema.sql:71` | **0 no seed**; produção desconhecida | consulta no 19c antes da aplicação | o novo trigger falha como o antigo (`ORA-01400`); tratar antes |
+| P2 | Consultar `NFSE` no `AFTER STATEMENT` de um compound trigger não dispara `ORA-04091` | documentação Oracle 11g+ | **confirmada em execução** no 23ai/26ai ([teste da proposta](#resultado-medido)); 19c segue a confirmar em homologação | [tests/propostas/0005-trigger-guia.sh](../../tests/propostas/0005-trigger-guia.sh) | usar tabela temporária global como alternativa |
+| P3 | Segurar o lock de `GUIAS` até o commit não causa deadlock com o lote | — | hipótese; entre dois cancelamentos pelo wrapper, **confirmada**: a segunda sessão espera ~2 s e conclui | teste de carga lote + cancelamento na mesma competência | ordenar as operações ou manter o recálculo do lote fora da transação |
+| P4 | Não há notas com `COMPETENCIA` nula em produção | coluna nullable em `db/01_schema.sql:71` | **0 no seed**; produção desconhecida | consulta no 19c antes da aplicação; o `aplicar.sql` também confere e aborta sem alterar nada | o novo trigger falha como o antigo (`ORA-01400`); tratar antes |
+| P5 | Duas sessões cancelando notas diferentes da mesma competência chegam ao valor certo | — | **confirmada em execução**, com um ajuste no SQL original (ver [Decisão proposta](#decisão-proposta)) | teste da proposta, passo 4 | — |
 
 ## Decisão proposta
 
 Substituir o trigger por um **compound trigger** (disponível desde o 11g, compatível com 19c) que coleta as competências afetadas por linha e recalcula **uma vez por competência, ao fim do comando, na mesma transação**, sem `PRAGMA` e sem `COMMIT`:
 
-```sql
-CREATE OR REPLACE TRIGGER TRG_NFSE_SITUACAO_GUIA
-FOR UPDATE OF SITUACAO ON NFSE
-COMPOUND TRIGGER
-    TYPE t_chave IS RECORD (prestador_id NFSE.PRESTADOR_ID%TYPE, competencia NFSE.COMPETENCIA%TYPE);
-    TYPE t_chaves IS TABLE OF t_chave INDEX BY VARCHAR2(40);   -- chave = prestador|competência: deduplica
-    g_chaves t_chaves;
-    v_k      VARCHAR2(40);
+O SQL versionado está em [db/propostas/0005-correcao-trigger-guia/aplicar.sql](../../db/propostas/0005-correcao-trigger-guia/aplicar.sql). Ele não roda em nenhum init, compose ou CI de paridade ([db/propostas](../../db/propostas/README.md)). A estrutura é a que esta ADR propôs em 2026-10-16:
 
-    BEFORE STATEMENT IS
-    BEGIN
-        g_chaves.DELETE;                                       -- estado limpo mesmo após erro em comando anterior
-    END BEFORE STATEMENT;
+- `BEFORE STATEMENT` limpa a coleção;
+- `AFTER EACH ROW` guarda `(prestador, competência)` numa coleção indexada pela chave, o que deduplica;
+- `AFTER STATEMENT` chama `PKG_GUIA.recalcular_guia` uma vez por chave.
 
-    AFTER EACH ROW IS
-    BEGIN
-        v_k := TO_CHAR(:NEW.PRESTADOR_ID) || '|' || TO_CHAR(:NEW.COMPETENCIA, 'YYYYMMDDHH24MISS');
-        g_chaves(v_k).prestador_id := :NEW.PRESTADOR_ID;
-        g_chaves(v_k).competencia  := :NEW.COMPETENCIA;
-    END AFTER EACH ROW;
+O teste trouxe três ajustes:
 
-    AFTER STATEMENT IS
-    BEGIN
-        v_k := g_chaves.FIRST;
-        WHILE v_k IS NOT NULL LOOP                              -- um recálculo por (prestador, competência)
-            PKG_GUIA.recalcular_guia(g_chaves(v_k).prestador_id, g_chaves(v_k).competencia);
-            v_k := g_chaves.NEXT(v_k);
-        END LOOP;
-        g_chaves.DELETE;
-    END AFTER STATEMENT;
-END TRG_NFSE_SITUACAO_GUIA;
-```
+- **Guia ainda inexistente e cancelamentos concorrentes.** Com o SQL original desta ADR, duas sessões que cancelam notas da mesma competência sem guia caem as duas no `INSERT` do `MERGE`. A segunda espera a primeira e recebe `ORA-00001`, e o cancelamento dela falha **[M]**. O trigger antigo não tem esse erro, porque a transação autônoma confirma na hora. O `aplicar.sql` captura `DUP_VAL_ON_INDEX` e refaz o recálculo, que então já enxerga a guia criada pela outra sessão.
+- **Trava explícita da guia antes do `MERGE`.** Com a guia existente, o SQL original chegou ao valor certo no 23ai/26ai: a segunda sessão esperou o lock, e o Oracle reiniciou o `MERGE` dela, que somou de novo já com a nota da primeira **[M]**. A documentação não garante esse reinício para o 19c. Por isso o trigger faz `SELECT ... FOR UPDATE` na guia e só então chama o `MERGE`, que é outro comando, com outra leitura consistente.
+- **Chave com o prestador preenchido com zeros e pré-condição P4.** A coleção é percorrida em ordem de chave, e com os zeros essa ordem é numérica e igual em todas as sessões, então duas sessões travam as guias na mesma sequência. Antes de criar o trigger, o `aplicar.sql` aborta se houver nota com `COMPETENCIA` nula.
 
 A deduplicação é **obrigatória**: sem ela, um cancelamento em massa de N notas da mesma competência faria N `MERGE`, cada um agregando a competência inteira, justamente o cenário que motiva a correção.
 
 ### Pacote de mudança
 
-1. `db/legado-mudancas/0005_trg_nfse_situacao_guia.sql` — novo trigger.
-2. `db/legado-mudancas/0005_rollback.sql` — DDL original, versionado byte a byte.
-3. Relatório de reconciliação (somente leitura): guias `'A'` cujo `VALOR_ISS` difere do recálculo atual. **Guias `'P'` nunca são alteradas**; o tratamento de guias pagas a maior é decisão da Fazenda.
-4. Teste que prova o defeito (vermelho após a correção) e teste que prova a correção.
+Em [db/propostas/0005-correcao-trigger-guia](../../db/propostas/0005-correcao-trigger-guia/), com o rito de aprovação no [README da pasta](../../db/propostas/README.md):
+
+1. `aplicar.sql`: novo trigger, com a pré-condição P4 conferida antes e a validade do objeto depois.
+2. `reverter.sql`: DDL original, cópia byte a byte de `db/04_triggers.sql`. O teste confere que o DDL depois da reversão é idêntico ao da linha de base.
+3. `relatorio-reconciliacao.sql`: só leitura (`SET TRANSACTION READ ONLY`). Lista em CSV as guias `'A'` cujo `VALOR_ISS` difere do recálculo atual, com o total. **Guias `'P'` nunca são alteradas**; o tratamento de guias pagas a maior é decisão da Fazenda. Pela [ADR-0012](0012-observabilidade-seguranca-e-lgpd.md), o relatório leva só o ID da guia e o ID interno do prestador. CNPJ/CPF, inscrição municipal e razão social ficam fora: a Fazenda localiza o contribuinte pelo ID no próprio sistema. Mesmo assim o arquivo é dado pessoal pseudonimizado, e circula só entre DBA e Fazenda.
+4. Teste em Oracle descartável: [tests/propostas/0005-trigger-guia.sh](../../tests/propostas/0005-trigger-guia.sh), sobre um banco recém-carregado, com projeto compose próprio e sem porta publicada. No CI, só por `workflow_dispatch` ([propostas.yml](../../.github/workflows/propostas.yml)). É um script, e não um teste .NET, porque o que se testa é DDL e PL/SQL no schema do legado, com três usuários (dono, runtime do wrapper e SYS para contar `MERGE` no `V$SQL`), duas sessões concorrentes e um banco que sobe e cai com o teste. Isso é `sqlplus` dentro do container; um projeto .NET só acrescentaria uma camada de driver. Fica fora da solução e da paridade, que testam o legado como ele está.
 
 ### Implantação
 
@@ -116,10 +98,32 @@ Independente da migração: pode ser aplicado antes, durante ou depois, sem rela
 
 ## Reversão
 
-Executar `0005_rollback.sql` (recria o trigger original). As guias recalculadas durante a vigência permanecem corretas; nenhum dado precisa ser revertido.
+Executar `reverter.sql` (recria o trigger original; DDL conferido no teste). As guias recalculadas durante a vigência permanecem corretas; nenhum dado precisa ser revertido.
+
+## Resultado medido
+
+**[M]** 2026-10-19, `tests/propostas/0005-trigger-guia.sh`, Oracle descartável do compose de `tests/propostas`. A imagem `gvenzl/oracle-free:23-slim` hoje entrega o *26ai Free Release 23.26.3*. O seed `01`–`06` foi recém-carregado (208 s até ficar saudável, arm64, máquina compartilhada).
+
+| Passo | Resultado |
+| --- | --- |
+| Linha de base, guia do prestador 25 (competência 2026-10) | 1608,58 |
+| Relatório de reconciliação na linha de base | 10.097 guias em aberto, **0 divergentes** |
+| Correção aplicada; 25/1 cancelada, lida **antes do commit** | 1557,01 |
+| 25/1 e 25/2 canceladas, lida antes do commit | **1267,86** |
+| `ROLLBACK` | 1608,58 (o recálculo é desfeito com o cancelamento) |
+| Três comandos na mesma transação (prestador 27) | 853,55 → 624,40 → 427,68, igual à soma das notas restantes a cada passo; `ROLLBACK` devolve 1115,12 |
+| `UPDATE` em massa: 390 notas de um prestador do seed de volume, 24 competências | **24** `MERGE` (um por competência), 10 ms; guias abertas zeradas antes do commit, pagas inalteradas |
+| Mesmo `UPDATE` com o trigger original | **390** `MERGE` (um por nota), 60 ms; nenhuma guia descontada |
+| Concorrência pelo wrapper, guia existente: A segura a transação 3 s, B cancela outra nota | B espera 1,95 s; guia final igual à soma das notas restantes |
+| Concorrência pelo wrapper, guia ainda inexistente | B espera 1,98 s e conclui (com o SQL original desta ADR: `ORA-00001`); uma guia, com o valor certo |
+| Relatório com a correção | 0 divergentes |
+| `reverter.sql` | DDL do trigger idêntico ao da linha de base |
+| Trigger original de volta: 25/1 e 25/2 em commits separados | **1557,01** (K07 de volta; o correto seria 1267,86) |
+| Relatório depois da reversão | **1 divergente**: guia do prestador 25, 2026-10, 289,15 cobrados a mais, 2 notas canceladas |
+
+Fica para homologação 19c (README de `db/propostas`, passo 3): repetir o teste nessa versão, onde os códigos de erro e o reinício do `MERGE` podem diferir. Fica também o teste de carga de lote e cancelamento na mesma competência (P3).
 
 ## Como verificar
 
-- Integração: cancelar uma nota e, **na mesma sessão antes do commit**, ler a guia: o valor já desconta a nota. Após `ROLLBACK`, guia volta ao valor anterior.
-- Integração: `UPDATE NFSE SET SITUACAO = 'C' WHERE PRESTADOR_ID = :p AND COMPETENCIA = :c` (massa, 400 notas do seed de volume) deixa a guia com o valor das notas restantes, executa **um** recálculo por competência (`DT_ATUALIZACAO` único) e tem tempo medido contra o trigger original.
+- Integração, **feita** ([Resultado medido](#resultado-medido)): cancelar e ler a guia na mesma transação antes do commit, com o `ROLLBACK` devolvendo o valor anterior; vários cancelamentos na mesma competência; `UPDATE` em massa com um `MERGE` por competência, contado no `V$SQL`; concorrência pelo wrapper com e sem guia; reversão. Para repetir: `tests/propostas/0005-trigger-guia.sh`.
 - Teste de carga: lote e cancelamentos concorrentes na mesma competência não geram deadlock; p99 do processamento de lote dentro do baseline.

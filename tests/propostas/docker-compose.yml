@@ -1,0 +1,31 @@
+# Oracle descartável só para as propostas de mudança no legado (db/propostas). Projeto próprio, sem porta publicada e
+# sem os outros serviços: não disputa a 1521 nem o volume do compose da raiz. Quem sobe e derruba é o script do teste.
+name: nfse-propostas
+
+services:
+  oracle:
+    image: gvenzl/oracle-free:23-slim
+    environment:
+      TZ: America/Sao_Paulo
+      ORACLE_PASSWORD: oracle_dev_123
+      APP_USER: NFSE_OWNER
+      APP_USER_PASSWORD: nfse_dev_123
+      NFSE_MODERNO_PASSWORD: moderno_dev_123
+      NFSE_MODERNO_APP_PASSWORD: moderno_app_dev_123
+      NFSE_MODERNO_RO_PASSWORD: moderno_ro_dev_123
+    volumes:
+      # Mesmo init do compose da raiz (legado 01–06 e NFSE_MODERNO): a linha de base é o banco recém-carregado.
+      # db/propostas fica visível em /opt/nfse/db/propostas, mas nenhum init a executa.
+      - ../../db:/opt/nfse/db:ro
+      - ../../db/init.sh:/container-entrypoint-initdb.d/10_nfse.sh:ro
+      - ../../db/moderno/init.sh:/container-entrypoint-initdb.d/20_moderno.sh:ro
+      - oracle-data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 180
+      start_period: 60s
+
+volumes:
+  oracle-data:

@@ -1,0 +1,22 @@
+name: propostas
+
+# Mudanças propostas no legado (db/propostas) testadas num Oracle descartável. Só manual: nenhuma proposta faz parte do
+# caminho da migração, e o teste carrega o seed inteiro (~2 milhões de notas) num banco próprio.
+on:
+  workflow_dispatch:
+
+jobs:
+  adr-0005-trigger-guia:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: ADR-0005 (correção do K07) aplicada, conferida e revertida num Oracle descartável
+        run: tests/propostas/0005-trigger-guia.sh
+      - name: Números medidos e relatórios de reconciliação
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proposta-0005
+          path: tests/propostas/saida/
+          if-no-files-found: ignore
