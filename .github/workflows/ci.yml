@@ -85,6 +85,52 @@ jobs:
         if: always()
         run: docker compose down -v
 
+  oracle-21c:
+    # Opcional, só manual: o job compose sobre Oracle XE 21c, a versão gratuita mais próxima do 19c de produção
+    # (docs/spikes/2026-10-20-oracle-xe21.md). Mede o quanto a entrega depende do 23ai; não bloqueia PR.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      COMPOSE_ARGS: -p nfse-xe21 -f docker-compose.yml -f tests/oracle-21c/docker-compose.xe21.yml
+      NFSE_ORACLE_PDB: XEPDB1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build das imagens (legado, fachada, serviço novo)
+        run: docker compose $COMPOSE_ARGS build
+      - name: Sobe o ambiente sobre o XE 21c e espera todos saudáveis
+        run: docker compose $COMPOSE_ARGS up -d --wait --wait-timeout 2400
+      - name: Connection strings (porta aleatória do Oracle no host)
+        run: |
+          porta="$(docker compose $COMPOSE_ARGS port oracle 1521)"
+          echo "NFSE_PARIDADE_ORACLE=User Id=NFSE_MODERNO_APP;Password=moderno_app_dev_123;Data Source=${porta}/XEPDB1" >> "$GITHUB_ENV"
+          echo "NFSE_PARIDADE_ORACLE_RO=User Id=NFSE_MODERNO_RO;Password=moderno_ro_dev_123;Data Source=${porta}/XEPDB1" >> "$GITHUB_ENV"
+      - name: Smoke test
+        run: tools/smoke-compose.sh
+      - name: Golden master das leituras recapturado no legado
+        run: tests/paridade/recapturar-leituras-legado.sh
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Paridade e garantias do banco
+        run: dotnet test tests/Nfse.Paridade.Testes -c Release
+      - name: K08 corrigido pelo wrapper
+        env:
+          NFSE_PARIDADE_K08: "1"
+        run: dotnet test tests/Nfse.Paridade.Testes -c Release --no-build --filter "FullyQualifiedName~Nfse.Paridade.Testes.GarantiaK08Tests"
+      - name: Paridade do cancelamento (FIXED_DATE no XEPDB1)
+        run: tests/paridade/cancelamento-fixed-date.sh
+      - name: Leituras conferidas de novo
+        run: dotnet test tests/Nfse.Paridade.Testes -c Release --no-build --filter "FullyQualifiedName~Nfse.Paridade.Testes.ParidadeLeiturasTests"
+      - name: Estado e logs
+        if: failure()
+        run: |
+          docker compose $COMPOSE_ARGS ps -a
+          docker compose $COMPOSE_ARGS logs --no-color --tail 300
+      - name: Derruba
+        if: always()
+        run: docker compose $COMPOSE_ARGS down -v
+
   manifests:
     # Valida os overlays de deploy/k8s contra os schemas do Kubernetes e dos CRDs (Argo Rollouts, External Secrets, OpenFeature).
     # Não precisa de cluster. Binários com versão e SHA-256 fixos; o schema dos CRDs vem do datreeio/CRDs-catalog.

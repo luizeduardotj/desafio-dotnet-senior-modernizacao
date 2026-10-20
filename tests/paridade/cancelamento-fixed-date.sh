@@ -4,22 +4,23 @@
 # O teste cancela notas do seed: rode depois da paridade das leituras e reponha o banco antes de rodá-las de novo
 # (no CI o job termina com `down -v`).
 #   1. confere que as notas que o corpus cancela (prestador 25, notas 1 e 2) ainda estão normais;
-#   2. ALTER SYSTEM SET FIXED_DATE como SYS no FREEPDB1 (autenticação do SO dentro do container, sem senha);
+#   2. ALTER SYSTEM SET FIXED_DATE como SYS no PDB, FREEPDB1 por padrão (autenticação do SO dentro do container, sem senha);
 #   3. dotnet test só do ParidadeCancelamentoTests, com NFSE_PARIDADE_CANCELAMENTO=1;
 #   4. FIXED_DATE = NONE ao sair, passe ou falhe.
-# Argumentos extras do compose (ex.: -p nome) vão em COMPOSE_ARGS.
+# Argumentos extras do compose (ex.: -p nome) vão em COMPOSE_ARGS; outro PDB (ex.: XEPDB1 no XE 21c) em NFSE_ORACLE_PDB.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 : "${NFSE_PARIDADE_ORACLE:?defina NFSE_PARIDADE_ORACLE com a connection string do NFSE_MODERNO_APP}"
 FIXED_DATE="2026-10-09-15:00:00"
+PDB="${NFSE_ORACLE_PDB:-FREEPDB1}"
 
 # shellcheck disable=SC2086
 compose() { docker compose ${COMPOSE_ARGS:-} "$@"; }
 
 # SQL da entrada padrão como SYS no PDB; qualquer erro termina com código diferente de zero.
 sys_pdb() {
-    { echo "WHENEVER SQLERROR EXIT FAILURE"; echo "SET FEEDBACK OFF"; echo "ALTER SESSION SET CONTAINER = FREEPDB1;"; cat; echo "EXIT"; } |
+    { echo "WHENEVER SQLERROR EXIT FAILURE"; echo "SET FEEDBACK OFF"; echo "ALTER SESSION SET CONTAINER = ${PDB};"; cat; echo "EXIT"; } |
         compose exec -T oracle sqlplus -s -L / as sysdba
 }
 

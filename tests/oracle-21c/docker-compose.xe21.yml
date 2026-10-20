@@ -1,0 +1,46 @@
+# Override do docker-compose.yml da raiz: o mesmo ambiente sobre Oracle XE 21c, a versão gratuita mais próxima do 19c
+# de produção (spike docs/spikes/2026-10-20-oracle-xe21.md). Projeto próprio e portas aleatórias no host, para não
+# colidir com o compose principal:
+#   docker compose -p nfse-xe21 -f docker-compose.yml -f tests/oracle-21c/docker-compose.xe21.yml up -d --build --wait
+# A imagem do XE só existe para amd64; em Mac arm64 roda emulada (Rosetta), mais lenta. db/ não muda: os scripts de
+# init são os mesmos, com o PDB trocado de FREEPDB1 para XEPDB1 numa cópia (initdb/ desta pasta).
+
+services:
+  oracle:
+    # gvenzl/oracle-xe:21-slim (21.3.0 XE), digest fixado em 2026-10-19
+    image: gvenzl/oracle-xe:21-slim@sha256:ecdf4302ac3d134e1bac5ef6e0c223c2d0f4d4d2b6d551aa79b2346f1ab8f792
+    platform: linux/amd64
+    ports: !override
+      - "127.0.0.1::1521"
+    volumes:
+      - ./db:/opt/nfse/db:ro
+      - ./tests/oracle-21c/initdb/10_nfse.sh:/container-entrypoint-initdb.d/10_nfse.sh:ro
+      - ./tests/oracle-21c/initdb/20_moderno.sh:/container-entrypoint-initdb.d/20_moderno.sh:ro
+      - ./tests/oracle-21c/initdb/30_pronto.sh:/container-entrypoint-initdb.d/30_pronto.sh:ro
+      - oracle-data:/opt/oracle/oradata
+    healthcheck:
+      # PDB aberto não basta no XE: exige o marcador gravado no fim do init (initdb/30_pronto.sh).
+      test: ["CMD-SHELL", "healthcheck.sh && test -f /opt/oracle/oradata/.nfse-init-ok"]
+      retries: 180
+
+  webservices:
+    environment:
+      NFSE_CONNECTION_STRING: "User Id=NFSE_OWNER;Password=${NFSE_OWNER_PASSWORD:-nfse_dev_123};Data Source=oracle:1521/XEPDB1;Min Pool Size=2;Connection Timeout=30"
+
+  fachada:
+    ports: !override
+      - "127.0.0.1::8080"
+      - "127.0.0.1::8081"
+
+  nfse-novo:
+    environment:
+      ConnectionStrings__Oracle: "User Id=NFSE_MODERNO_APP;Password=${NFSE_MODERNO_APP_PASSWORD:-moderno_app_dev_123};Data Source=oracle:1521/XEPDB1"
+      ConnectionStrings__OracleSomenteLeitura: "User Id=NFSE_MODERNO_RO;Password=${NFSE_MODERNO_RO_PASSWORD:-moderno_ro_dev_123};Data Source=oracle:1521/XEPDB1"
+    ports: !override
+      - "127.0.0.1::8080"
+
+  otel-lgtm:
+    ports: !override
+      - "127.0.0.1::3000"
+      - "127.0.0.1::4317"
+      - "127.0.0.1::4318"
