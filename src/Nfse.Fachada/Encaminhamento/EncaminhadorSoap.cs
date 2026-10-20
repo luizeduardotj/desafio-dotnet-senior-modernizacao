@@ -62,7 +62,18 @@ public sealed class EncaminhadorSoap(
         }
 
         TimeSpan noDestino;
-        if (decisao.Destino == Destino.Novo)
+        if (decisao.Destino == Destino.Novo && corpo is not null && PublicadorDaSombra.CopiavelInvertida(operacao, flags))
+        {
+            // Sombra invertida (só leituras): o novo responde, o tee copia, e os workers repetem no legado. Com fallback
+            // quem respondeu foi o legado, e não há o que copiar.
+            using CapturaDaResposta.Instalada captura = CapturaDaResposta.Instalar(ctx, OpcoesSombra.LimiteDaResposta);
+            (decisao, noDestino) = await EncaminharAoNovoAsync(ctx, operacao, nome, decisao).ConfigureAwait(false);
+            if (decisao.Destino == Destino.Novo)
+            {
+                sombra.AvaliarDepoisDoNovo(ctx, operacao, flags!.Da(operacao).Sombra.Amostragem, corpo, captura.Captura, inicio);
+            }
+        }
+        else if (decisao.Destino == Destino.Novo)
         {
             (decisao, noDestino) = await EncaminharAoNovoAsync(ctx, operacao, nome, decisao).ConfigureAwait(false);
         }

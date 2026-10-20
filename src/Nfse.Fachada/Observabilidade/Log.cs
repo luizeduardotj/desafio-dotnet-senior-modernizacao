@@ -35,10 +35,10 @@ internal static partial class Log
 
     [LoggerMessage(21, LogLevel.Warning,
         "Sombra {Operacao}: divergência {Classe} (regra {Regra}) trace {TraceId} status {StatusLegado}/{StatusNovo} " +
-        "sha256 legado {HashLegado} novo {HashNovo} caminhos {Caminhos} requisição {Requisicao}")]
+        "sha256 legado {HashLegado} novo {HashNovo} caminhos {Caminhos} requisição {Requisicao} modo {Modo} reprodução {Reproducao}")]
     public static partial void SombraDivergente(
         ILogger logger, string operacao, string classe, string regra, string traceId, int statusLegado, int statusNovo,
-        string hashLegado, string hashNovo, string caminhos, string requisicao);
+        string hashLegado, string hashNovo, string caminhos, string requisicao, string modo, string reproducao);
 
     [LoggerMessage(22, LogLevel.Warning, "Sombra {Operacao}: divergência erro_novo ({Erro}) trace {TraceId}")]
     public static partial void SombraErroNoNovo(ILogger logger, string operacao, string erro, string traceId);
@@ -48,11 +48,21 @@ internal static partial class Log
 
     [LoggerMessage(25, LogLevel.Warning,
         "Sombra {Operacao}: divergência {Classe} trace {TraceId} decisão legado {DecisaoLegado} novo {DecisaoNovo} " +
-        "status legado {StatusLegado} sha256 legado {HashLegado} requisição {Requisicao}")]
+        "status legado {StatusLegado} sha256 legado {HashLegado} requisição {Requisicao} reprodução {Reproducao}")]
     public static partial void SombraCancelamentoDivergente(
         ILogger logger, string operacao, string classe, string traceId, string decisaoLegado, string decisaoNovo,
-        int statusLegado, string hashLegado, string requisicao);
+        int statusLegado, string hashLegado, string requisicao, string reproducao);
 
     [LoggerMessage(24, LogLevel.Error, "Sombra {Operacao}: falha interna na comparação ({Tipo})")]
     public static partial void SombraFalhaInterna(ILogger logger, string operacao, string tipo);
+
+    // Reprodução cifrada (ADR-0009, fase 2): nunca o conteúdo nem o caminho, só o tipo do erro.
+    [LoggerMessage(26, LogLevel.Warning, "Sombra {Operacao}: reprodução cifrada não gravada ({Tipo})")]
+    public static partial void ReproducaoNaoGuardada(ILogger logger, string operacao, string tipo);
+
+    [LoggerMessage(27, LogLevel.Warning, "Sombra: limpeza da reprodução cifrada falhou ({Tipo})")]
+    public static partial void ReproducaoLimpezaFalhou(ILogger logger, string tipo);
+
+    [LoggerMessage(28, LogLevel.Information, "Sombra: {Apagados} arquivos de reprodução cifrada passaram da retenção e foram apagados")]
+    public static partial void ReproducaoLimpeza(ILogger logger, int apagados);
 }

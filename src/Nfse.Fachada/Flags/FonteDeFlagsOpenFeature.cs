@@ -311,13 +311,17 @@ public sealed class FonteDeFlagsOpenFeature : BackgroundService, IFonteDeFlags
 
         foreach ((string campo, Value valor) in v.AsStructure!.AsDictionary())
         {
-            if (!string.Equals(campo, nameof(FlagsDaSombra.Amostragem), StringComparison.Ordinal)
-                || !TentarInteiro(valor, out int amostragem))
+            switch (campo)
             {
-                return false;
+                case nameof(FlagsDaSombra.Amostragem) when TentarInteiro(valor, out int amostragem):
+                    sombra.Amostragem = amostragem;
+                    break;
+                case nameof(FlagsDaSombra.Invertida) when valor.IsBoolean:
+                    sombra.Invertida = valor.AsBoolean!.Value;
+                    break;
+                default:
+                    return false;
             }
-
-            sombra.Amostragem = amostragem;
         }
 
         return true;

@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Nfse.Fachada.Configuracao;
 using Nfse.Fachada.Observabilidade;
+using Nfse.Fachada.Sombra.Reproducao;
 
 namespace Nfse.Fachada.Sombra;
 
@@ -17,6 +18,7 @@ internal sealed class AvaliadorDoCancelamento(
     ClientesDaSombra clientes,
     IOptionsMonitor<OpcoesSombra> opcoes,
     IOptionsMonitor<OpcoesNovo> novo,
+    CofreDeReproducao cofre,
     ILogger<AvaliadorDoCancelamento> logger)
 {
     public const string Caminho = "/interno/sombra/cancelamento";
@@ -46,6 +48,7 @@ internal sealed class AvaliadorDoCancelamento(
                 return;
             }
 
+            TelemetriaDaSombra.ContarConferenciaDeCnpj(operacao, a.CnpjConfere);
             TelemetriaDaSombra.ContarComparacao(operacao, a.Igual);
             span?.SetTag("sombra.resultado", a.Igual ? "igual" : "divergente");
             if (a.Igual)
@@ -55,10 +58,12 @@ internal sealed class AvaliadorDoCancelamento(
             }
 
             ComparadorDaSombra.Registrar(span, operacao, a.Classe);
+            string reproducao = await cofre.GuardarAsync(copia, traceId, ct).ConfigureAwait(false);
             Log.SombraCancelamentoDivergente(
                 logger, operacao, ClassificadorDeDivergencia.Nome(a.Classe), traceId, a.DecisaoLegado, a.DecisaoNovo,
-                copia.StatusLegado, ComparadorDaSombra.Sha256(copia.RespostaLegado),
-                Pseudonimizador.Requisicao(copia.Requisicao, opcoes.CurrentValue.ChaveHmac) ?? "omitida");
+                copia.Status, ComparadorDaSombra.Sha256(copia.Resposta),
+                Pseudonimizador.Requisicao(copia.Requisicao, opcoes.CurrentValue.ChaveHmac) ?? "omitida",
+                reproducao);
         }
         finally
         {
@@ -76,8 +81,8 @@ internal sealed class AvaliadorDoCancelamento(
         // do banco, sem comparar relógios de máquinas diferentes.
         var pedido = new PedidoDeAvaliacao(
             Encoding.UTF8.GetString(copia.Requisicao),
-            Encoding.UTF8.GetString(copia.RespostaLegado),
-            copia.StatusLegado,
+            Encoding.UTF8.GetString(copia.Resposta),
+            copia.Status,
             (long)Stopwatch.GetElapsedTime(copia.T0).TotalMilliseconds);
         using var requisicao = new HttpRequestMessage(HttpMethod.Post, url.ToString().TrimEnd('/') + Caminho)
         {
@@ -113,10 +118,11 @@ internal sealed class AvaliadorDoCancelamento(
     /// <summary>Contrato do endpoint interno do novo. <c>IdadeMs</c>: do recebimento da requisição ao envio da cópia.</summary>
     private sealed record PedidoDeAvaliacao(string Envelope, string RespostaLegado, int StatusLegado, long IdadeMs);
 
-    private sealed record RespostaDaAvaliacao(string? Resultado, string? Classe, string? DecisaoLegado, string? DecisaoNovo);
+    /// <param name="CnpjConfere">O CNPJ do pedido é o do cadastro da IM (C18/K04)? O novo já lê o cadastro; <c>null</c>, nada a conferir.</param>
+    private sealed record RespostaDaAvaliacao(string? Resultado, string? Classe, string? DecisaoLegado, string? DecisaoNovo, bool? CnpjConfere);
 
     /// <param name="DecisaoLegado">Só um código curto (<c>E053</c>, <c>sucesso</c>): o resto vira <c>?</c> no log.</param>
-    private readonly record struct Avaliacao(bool Igual, ClasseDeDivergencia Classe, string DecisaoLegado, string DecisaoNovo)
+    private readonly record struct Avaliacao(bool Igual, ClasseDeDivergencia Classe, string DecisaoLegado, string DecisaoNovo, bool? CnpjConfere)
     {
         /// <summary>
         /// <c>null</c> se o corpo não segue o contrato. Um resultado ou classe fora da lista não vira label (cardinalidade):
@@ -154,7 +160,7 @@ internal sealed class AvaliadorDoCancelamento(
                 return null;
             }
 
-            return new(igual.Value, classe.Value, Decisao(r!.DecisaoLegado), Decisao(r.DecisaoNovo));
+            return new(igual.Value, classe.Value, Decisao(r!.DecisaoLegado), Decisao(r.DecisaoNovo), r.CnpjConfere);
         }
 
         private static string Decisao(string? valor) =>

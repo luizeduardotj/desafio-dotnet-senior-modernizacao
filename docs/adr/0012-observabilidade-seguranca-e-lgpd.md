@@ -52,10 +52,13 @@ A decisão acima continua valendo: os critérios de fase usam o que a fachada me
 | `sombra_divergencias_total` | `operacao`, `classe` | critério de avanço |
 | `sombra_descartadas_total`, `sombra_atraso_segundos` | `operacao` | saúde da sombra |
 | `cancelamento_regra_divergente_total` | `codigo_plsql`, `decisao_dominio` | dual-run ([ADR-0003](0003-regras-de-cancelamento-em-plsql.md)) |
-| `soap_cnpj_inconsistente_total` (a implementar) | `operacao` | dado para corrigir C18/K04 no futuro |
+| `soap_cnpj_inconsistente_total`, `soap_cnpj_conferido_total` | `operacao` | dado para corrigir C18/K04 no futuro: pedidos com CNPJ do prestador diferente do cadastrado para a IM, sobre os conferidos (abaixo) |
 | `sombra_reexecucoes_total` | `operacao`, `resultado` | custo da reexecução de leituras divergentes |
+| `sombra_reproducoes_total` | `operacao`, `resultado` (`guardada`, `limitada`, `erro`) | payload cifrado das divergências (fase 2 da ADR-0009) |
 | `migracao_modo_info` (gauge) | `operacao`, `modo`, `percentual` | estado atual das flags |
 | `kill_switch_ativo` (gauge) | — | alerta imediato |
+
+**CNPJ inconsistente (C18/K04).** É medido nos workers da sombra, fora do caminho do cliente e sem consulta a mais ao Oracle. No `ConsultarNfse`, o legado já devolve o CNPJ do cadastro em cada nota (`PrestadorServico/IdentificacaoPrestador/Cnpj` vem do join com `CONTRIBUINTES`), e a fachada o compara com o `Prestador/Cnpj` do pedido. No `CancelarNfse`, a resposta só ecoa o pedido (K10). Quem confere ali é o novo, que já lê o cadastro pela IM na avaliação da sombra e devolve só o booleano `cnpjConfere`. A comparação usa só os dígitos e ignora zeros à esquerda. Pedido sem CNPJ, ou resposta sem nota (`E010`, `E040`, Fault), não entra em nenhum dos dois contadores. `ConsultarNfseServicoTomado` não tem prestador. Limites: a taxa vale para a **amostra** da sombra, e as chaves raras, sempre copiadas, puxam a taxa para os casos de erro. No M0 estrito (tudo em `legado`) não há cópia. A medida começa com a sombra (M1), ou no M0 com a operação em `sombra` e amostragem baixa. Descartamos medir no caminho do cliente: em `legado`, o corpo atravessa em streaming, e ler pedido e resposta ali somaria parsing ao `fachada_overhead` de toda requisição.
 
 **Regra de cardinalidade:** prestador, documento, número de nota e protocolo **nunca** são labels. Esses dados ficam em traces e logs (pseudonimizados).
 
@@ -101,6 +104,13 @@ Os limites exatos estão no [plano de migração](../plano-de-migracao.md).
 - **SOAP:** sem autenticação, como hoje. O risco é aceito e registrado (C18, C19, K04), com medição para decisão futura. A fachada **não** adiciona rate limiting nesta fase (mudaria o comportamento para ERPs); fica como evolução com medição prévia.
 - **REST:** JWT obrigatório e autorização por recurso ([ADR-0010](0010-contrato-da-api-rest-v1.md)).
 - **Segredos:** strings de conexão, chaves HMAC/AES e credenciais só por variável de ambiente/Secret do Kubernetes. Nunca em `appsettings*.json` versionado (outro problema do PR-212).
+- **Payload cifrado da sombra (fase 2 da [ADR-0009](0009-sombra-escrita-unica-e-idempotencia.md), desligado por padrão).** É o único lugar em que o pedido de uma divergência existe por inteiro. Por isso a chave AES-256 tem dono e lista de acesso:
+  - **Dono:** o responsável pela segurança do Nota Carioca. Ele gera a chave, guarda-a no cofre de segredos da plataforma (Secret via External Secrets) e a rotaciona a cada retenção (15 dias **[H]**) ou quando alguém sai do papel. O time de desenvolvimento não tem a chave.
+  - **Fachada:** só a chave atual, que só cifra. As anteriores nunca entram no deployment dela.
+  - **Quem decifra:** o papel de operação da sombra, isto é, o plantão designado para triar divergências, com a lista conhecida pelo DPO. A ferramenta roda num Job efêmero do namespace de produção, com RBAC próprio, a chave atual e as anteriores ainda na retenção. Nunca roda em máquina pessoal. O acesso fica na auditoria do cluster.
+  - **Texto decifrado:** só no diretório efêmero do Job, apagado ao fim. Nunca vai para ticket, chat ou golden master: o caso que entra na [ADR-0011](0011-paridade-golden-master.md) é refeito com dados do seed.
+  - **Destruição:** depois de 15 dias sem arquivos dela, a chave anterior é destruída, o que deixa ilegível qualquer cópia que tenha escapado da limpeza (crypto-shredding).
+  - **Limite aceito:** a chave é simétrica, então quem lê o Secret da fachada, ou entra no pod dela, também decifra. Evolução possível: a fachada guardar só uma chave pública (envelope RSA-OAEP ou ECIES), e a privada ficar só com a operação.
 - **Erros:** nenhuma resposta (SOAP ou REST) inclui mensagem de exceção ou stack trace (C20).
 
 ### Números desta ADR

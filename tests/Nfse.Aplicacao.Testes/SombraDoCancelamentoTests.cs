@@ -17,16 +17,16 @@ public class SombraDoCancelamentoTests
     private sealed class Fakes(EstadoAtualDaNota estado, bool prestadorAtivo = true) : IContribuintes, ILeituraParaSombra
     {
         public Task<PrestadorLido?> ObterPorInscricaoAsync(string inscricaoMunicipal, CancellationToken cancellationToken) =>
-            Task.FromResult<PrestadorLido?>(inscricaoMunicipal == "10000025" ? new PrestadorLido(25, "10000025", null, null, prestadorAtivo) : null);
+            Task.FromResult<PrestadorLido?>(inscricaoMunicipal == "10000025" ? new PrestadorLido(25, "10000025", "13500075000183", null, prestadorAtivo) : null);
 
         public Task<EstadoAtualDaNota> LerAsync(long prestadorId, long numero, CancellationToken cancellationToken) => Task.FromResult(estado);
     }
 
     private static Task<AvaliacaoDaSombra> Avaliar(EstadoAtualDaNota estado, RespostaObservada observada, DateTime? dataHora = null,
-        string inscricao = "10000025", bool prestadorAtivo = true)
+        string inscricao = "10000025", bool prestadorAtivo = true, string? cnpj = null)
     {
         var fakes = new Fakes(estado, prestadorAtivo);
-        return new SombraDoCancelamento(fakes, fakes).AvaliarAsync(inscricao, 1, observada, dataHora, Idade, CancellationToken.None);
+        return new SombraDoCancelamento(fakes, fakes).AvaliarAsync(inscricao, 1, cnpj, observada, dataHora, Idade, CancellationToken.None);
     }
 
     private static EstadoAtualDaNota Estado(SituacaoNota? situacao, Competencia competencia, DateTime? cancelamento = null,
@@ -132,4 +132,43 @@ public class SombraDoCancelamentoTests
 
         Assert.False(a.PrestadorEncontrado);
     }
+
+    [Theory]
+    [InlineData("13500075000183", true)]
+    [InlineData("13.500.075/0001-83", true)]
+    [InlineData("99999999000191", false)]
+    [InlineData(null, null)]
+    [InlineData("", null)]
+    public async Task K04_documento_do_pedido_conferido_com_o_cadastro_da_IM(string? cnpj, bool? confere)
+    {
+        AvaliacaoDaSombra a = await Avaliar(Estado(SituacaoNota.Normal, Outubro), RespostaObservada.PrazoExpirado, cnpj: cnpj);
+
+        Assert.Equal(confere, a.DocumentoConfere);
+    }
+
+    [Fact]
+    public async Task K04_conferido_mesmo_quando_a_avaliacao_e_indeterminada()
+    {
+        AvaliacaoDaSombra a = await Avaliar(Estado(SituacaoNota.Normal, Outubro), RespostaObservada.Fault, cnpj: "99999999000191");
+
+        Assert.Equal(ClasseDeSombra.Indeterminado, a.Classe);
+        Assert.False(a.DocumentoConfere);
+    }
+
+    [Fact]
+    public async Task K04_sem_prestador_nao_ha_o_que_conferir()
+    {
+        AvaliacaoDaSombra a = await Avaliar(Estado(SituacaoNota.Normal, Outubro), RespostaObservada.PrazoExpirado, inscricao: "99999999", cnpj: "13500075000183");
+
+        Assert.Null(a.DocumentoConfere);
+    }
+
+    [Theory]
+    [InlineData("01234567000195", "1234567000195", true)]
+    [InlineData("1234567000195", "01234567000195", true)]
+    [InlineData("12345678909", "12345678909", true)]
+    [InlineData("00000000000000", "13500075000183", null)]
+    [InlineData("13500075000183", null, null)]
+    public void K04_conferencia_ignora_formatacao_e_zeros_a_esquerda(string? informado, string? cadastrado, bool? confere) =>
+        Assert.Equal(confere, SombraDoCancelamento.Conferir(informado, cadastrado));
 }

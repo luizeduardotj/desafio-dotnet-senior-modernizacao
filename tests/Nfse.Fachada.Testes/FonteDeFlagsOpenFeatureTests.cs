@@ -115,6 +115,8 @@ public sealed class FonteDeFlagsOpenFeatureTests : IAsyncDisposable
     [InlineData("amostragem negativa")]
     [InlineData("campo desconhecido")]
     [InlineData("lista com número")]
+    [InlineData("sombra invertida no cancelamento")]
+    [InlineData("invertida não booleana")]
     public async Task Flags_ausentes_ou_invalidas_viram_null(string caso)
     {
         var flags = Padrao();
@@ -157,11 +159,33 @@ public sealed class FonteDeFlagsOpenFeatureTests : IAsyncDisposable
                 flags["ConsultarNfse.config"] = Config(Structure.Builder()
                     .Set("Modo", "novo").Set("Inclusao", new List<Value> { new(10000001) }).Build());
                 break;
+            case "sombra invertida no cancelamento":
+                flags["CancelarNfse.config"] = Config(Structure.Builder().Set("Modo", "novo").Set("Percentual", 100)
+                    .Set("Sombra", Structure.Builder().Set("Invertida", true).Build()).Build());
+                break;
+            case "invertida não booleana":
+                flags["ConsultarNfse.config"] = Config(Structure.Builder().Set("Modo", "novo")
+                    .Set("Sombra", Structure.Builder().Set("Invertida", "sim").Build()).Build());
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(caso), caso, null);
         }
 
         Assert.Null(await LerAsync(new InMemoryProvider(flags)));
+    }
+
+    [Fact]
+    public async Task Sombra_invertida_das_leituras_vem_do_objeto_da_operacao()
+    {
+        var flags = Padrao();
+        flags["ConsultarNfse.config"] = Config(Structure.Builder().Set("Modo", "novo").Set("Percentual", 100)
+            .Set("Sombra", Structure.Builder().Set("Amostragem", 5).Set("Invertida", true).Build()).Build());
+
+        FlagsDeMigracao? retrato = await LerAsync(new InMemoryProvider(flags));
+
+        Assert.NotNull(retrato);
+        Assert.True(retrato.Da("ConsultarNfse").Sombra.Invertida);
+        Assert.Equal(5, retrato.Da("ConsultarNfse").Sombra.Amostragem);
     }
 
     [Fact]

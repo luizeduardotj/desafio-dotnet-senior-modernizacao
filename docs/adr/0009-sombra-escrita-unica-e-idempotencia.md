@@ -90,7 +90,18 @@ O registro (log estruturado + métrica, nunca no Oracle) contém:
 
 - operação, modo, `traceId`, classe, caminhos XPath que divergem, hash de cada resposta;
 - requisição **pseudonimizada**: CPF/CNPJ, razões sociais **e inscrição municipal** substituídos por HMAC-SHA256 com chave rotacionável (a IM de um MEI identifica uma pessoa). Número da nota, período e página ficam em claro;
-- para reprodução exata, o payload original **cifrado** (AES-GCM, chave em secret), retido por 15 dias e acessível só pelo papel de operação. *(Fase 2: no MVP, a pseudonimização basta para reproduzir com o seed.)*
+- para reprodução exata, o payload original **cifrado** (AES-GCM, chave em secret), retido por 15 dias e acessível só pelo papel de operação. *(Fase 2, implementada em 2026-10-19 e desligada por padrão: no MVP, a pseudonimização basta para reproduzir com o seed.)*
+
+#### Reprodução cifrada (fase 2)
+
+Com `Sombra:Reproducao:Habilitada`, cada divergência (eventos 21 e 25) grava um arquivo cifrado com AES-256-GCM. O log passa a levar só o identificador do arquivo (`reprodução <id>`), que não tem dado pessoal. Detalhes de operação no [README da fachada](../../src/Nfse.Fachada/README.md#reprodução-cifrada):
+
+- **O que é guardado (minimização):** o pedido original, `SOAPAction`, `Content-Type`, o status e o SHA-256 da resposta que o cliente recebeu. A resposta em si só é guardada no `CancelarNfse`, porque o novo precisa dela para reavaliar a decisão. Uma página de leitura traz documentos de tomadores, e o hash basta para saber se o lado que respondeu ainda devolve o mesmo.
+- **Em claro e autenticado:** versão, identificador, operação, `traceId`, instante e identificador da chave. Esses metadados entram como dado associado do GCM, então alterar qualquer um deles invalida a decifração.
+- **Onde e por quanto tempo:** num diretório só da fachada (volume próprio, arquivo `0600`), escrito pelos workers, fora do caminho do cliente e no máximo `PorSegundo` arquivos por operação. A limpeza apaga os arquivos com mais de `Retencao` (15 dias). Nunca no Oracle e nunca em log.
+- **Chaves e rotação:** a fachada só tem a chave **atual** (`ChaveId` + `Chave`). As anteriores ficam só com a ferramenta, até o último arquivo delas expirar, e depois são destruídas. Destruir a chave torna ilegível qualquer cópia que tenha escapado da limpeza.
+- **Reprodução:** `dotnet Nfse.Fachada.dll reproduzir decifrar|reexecutar <arquivo>`, na mesma imagem. Leituras são reenviadas ao `/NfseWS.asmx` dos dois lados e comparadas em bytes. O `CancelarNfse` **nunca** é reenviado ao SOAP, porque cancelaria de novo: ele é reavaliado sem escrita no endpoint interno da seção 3, com a resposta do legado guardada. A saída mostra só status, hashes e caminhos XPath.
+- **Quem pode ter a chave:** ver [ADR-0012](0012-observabilidade-seguranca-e-lgpd.md#segurança-e-lgpd).
 
 ### 5. Escrita única
 
@@ -112,6 +123,18 @@ O registro (log estruturado + métrica, nunca no Oracle) contém:
 - **REST:** `POST .../cancelamento` repetido devolve `200` com o mesmo recurso. Concorrência é serializada pelo lock do wrapper. **Não há tabela de idempotência.** O header `Idempotency-Key` é aceito e propagado para logs e traces (correlação de reenvios), mas não é obrigatório.
 - Se no futuro o cancelamento ganhar efeitos não idempotentes (ex.: notificação ao tomador), uma tabela de chaves gravada **na mesma transação** do cancelamento passa a ser necessária.
 
+### 7. Sombra invertida (fase 2, M3/M4): só leituras
+
+*(Acrescentada em 2026-10-19.)* Em `novo`, com `Sombra.Invertida = true` na operação, o **novo responde ao cliente** e a leitura é repetida no legado pelos mesmos workers, para comparação. É a rede de segurança do M3/M4: quando o legado deixa de ser a referência do cliente, uma regressão do novo continua aparecendo como divergência.
+
+- O caminho é o mesmo das seções 1, 2 e 4, com os lados trocados: tee da resposta do novo, sorteio depois da resposta (`Sombra.Amostragem` e chaves raras), canal limitado, worker, comparação em bytes, reexecução dos dois lados, classe e registro. O registro leva `modo sombra_invertida`, e o span leva `migracao.modo = sombra_invertida`.
+- Se houve fallback, quem respondeu foi o legado, e não há cópia. Falha do legado na cópia é descarte (`erro_legado`), não divergência do novo, porque o legado ali é só referência.
+- **`CancelarNfse` invertido é proibido.** Repetir o cancelamento no legado seria escrita dupla (seção 5). "Só avaliar" também não existe: o legado não tem avaliação sem escrita, e o caminho inverso do endpoint da seção 3 exigiria mudar o legado. Há três travas, cada uma com teste:
+  1. **Validação das flags:** `Sombra.Invertida` em `CancelarNfse`, em qualquer modo, invalida o retrato inteiro, no arquivo e no OpenFeature. Pelo fail-safe da [ADR-0008](0008-fachada-yarp-roteamento-e-flags.md), tudo vai ao legado e `/health/ready` responde 503. Errar a configuração do cancelamento devolve o tráfego ao legado e nunca duplica a escrita.
+  2. **Publicação:** a fachada só instala a cópia invertida em leitura, mesmo que um retrato chegue sem validação.
+  3. **Worker:** uma cópia invertida de cancelamento é descartada (`invertida_proibida`) antes de qualquer chamada.
+- Como no M3/M4 a operação está em `novo`, as métricas `sombra_*` dela são todas da sombra invertida; o modo vem de `migracao_modo_info`. Não há label novo.
+
 ### Números desta ADR
 
 | Valor | Origem | Onde calibrar |
@@ -127,8 +150,8 @@ O registro (log estruturado + métrica, nunca no Oracle) contém:
 | --- | --- | --- |
 | Aprovação da pseudonimização e da retenção pelo encarregado de dados (DPO) | DPO | a sombra em produção (qualquer operação) |
 | Critérios estatísticos de saída da sombra (N, limite inferior de Wilson, códigos raros) | time de modernização | o avanço de `sombra` para `novo`; definidos no [plano de migração](../plano-de-migracao.md) |
-| Payload cifrado para reprodução exata | time de modernização | nada; fase 2 |
-| Sombra invertida em modo `novo` | time de modernização | nada; fase 2 |
+| ~~Payload cifrado para reprodução exata~~ | — | implementado, desligado por padrão (seção 4); ligar em produção depende do DPO (linha acima) e de um volume e um Secret no deploy |
+| ~~Sombra invertida em modo `novo`~~ | — | implementada para leituras (seção 7); proibida no cancelamento |
 
 ## Alternativas consideradas
 
@@ -156,3 +179,5 @@ O registro (log estruturado + métrica, nunca no Oracle) contém:
 - Teste: a avaliação de sombra usa `NFSE_MODERNO_RO`; tentar chamar o wrapper por esse pool falha com `PLS-00201`.
 - Teste: cada linha da tabela de reconstrução, incluindo cancelamento repetido, Fault e fronteira de prazo, com relógio injetado (sem depender de `FIXED_DATE`, [ADR-0011](0011-paridade-golden-master.md)).
 - Teste REST: o mesmo cancelamento enviado 10× em paralelo → um único `UPDATE`, 10 respostas `200` iguais.
+- Teste: sombra invertida em `CancelarNfse` invalida as flags (arquivo e OpenFeature), e um retrato sem validação também não gera cópia: o cancelamento chega uma vez ao novo e nunca ao legado (`SombraInvertidaTests`).
+- Teste: o arquivo de reprodução não traz CNPJ, IM nem motivo em claro; chave errada, ausente ou metadado alterado não decifram; a limpeza apaga o que passou da retenção; a ferramenta nunca reenvia `CancelarNfse` ao SOAP (`ReproducaoTests`).

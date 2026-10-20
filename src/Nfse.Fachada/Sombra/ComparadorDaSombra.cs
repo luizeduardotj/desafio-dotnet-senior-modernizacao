@@ -5,6 +5,8 @@ using System.Security.Cryptography;
 using Microsoft.Extensions.Options;
 using Nfse.Fachada.Configuracao;
 using Nfse.Fachada.Observabilidade;
+using Nfse.Fachada.Roteamento;
+using Nfse.Fachada.Sombra.Reproducao;
 
 namespace Nfse.Fachada.Sombra;
 
@@ -17,6 +19,7 @@ internal sealed class ComparadorDaSombra(
     IOptionsMonitor<OpcoesSombra> opcoes,
     IOptionsMonitor<OpcoesLegado> legado,
     IOptionsMonitor<OpcoesNovo> novo,
+    CofreDeReproducao cofre,
     ILogger<ComparadorDaSombra> logger)
 {
     private readonly LimiteDeReexecucao _limite = new(() => opcoes.CurrentValue.ReexecucoesPorSegundo);
@@ -30,6 +33,12 @@ internal sealed class ComparadorDaSombra(
 
         try
         {
+            // Antes de chamar o outro lado: a conferência só usa o pedido e a resposta já capturada.
+            if (operacao == OperacoesSoap.ConsultarNfse)
+            {
+                TelemetriaDaSombra.ContarConferenciaDeCnpj(operacao, ConferenciaDeCnpj.DaConsulta(copia.Requisicao, copia.Resposta));
+            }
+
             Uri? urlDoNovo = novo.CurrentValue.Url;
             if (urlDoNovo is null)
             {
@@ -37,15 +46,30 @@ internal sealed class ComparadorDaSombra(
                 return;
             }
 
-            Resultado doNovo = await ChamarAsync(clientes.Novo, urlDoNovo, copia, ct).ConfigureAwait(false);
-            if (doNovo.Erro is { } erro)
+            // Direta: o legado respondeu ao cliente e a leitura é repetida no novo. Invertida: o contrário.
+            Resultado doOutroLado = copia.Invertida
+                ? await ChamarAsync(clientes.Legado, legado.CurrentValue.Url!, copia, ct).ConfigureAwait(false)
+                : await ChamarAsync(clientes.Novo, urlDoNovo, copia, ct).ConfigureAwait(false);
+            if (doOutroLado.Erro is { } erro)
             {
+                if (copia.Invertida)
+                {
+                    // O legado é só a referência aqui: a falha dele não é divergência do novo.
+                    TelemetriaDaSombra.ContarDescarte(operacao, "erro_legado");
+                    Log.SombraDescartada(logger, operacao, "erro_legado");
+                    return;
+                }
+
                 Registrar(span, operacao, ClasseDeDivergencia.ErroNovo);
                 Log.SombraErroNoNovo(logger, operacao, erro, traceId);
                 return;
             }
 
-            bool igual = copia.StatusLegado == doNovo.Status && copia.RespostaLegado.AsSpan().SequenceEqual(doNovo.Corpo);
+            (Resultado doLegado, Resultado doNovo) = copia.Invertida
+                ? (doOutroLado, new Resultado(copia.Status, copia.Resposta, null))
+                : (new Resultado(copia.Status, copia.Resposta, null), doOutroLado);
+
+            bool igual = doLegado.Status == doNovo.Status && doLegado.Corpo.AsSpan().SequenceEqual(doNovo.Corpo);
             TelemetriaDaSombra.ContarComparacao(operacao, igual);
             span?.SetTag("sombra.resultado", igual ? "igual" : "divergente");
             if (igual)
@@ -55,15 +79,18 @@ internal sealed class ComparadorDaSombra(
             }
 
             (ClasseDeDivergencia classe, string? regra) =
-                ClassificadorDeDivergencia.SemReexecucao(copia.Requisicao, copia.StatusLegado, copia.RespostaLegado, doNovo.Status, doNovo.Corpo)
+                ClassificadorDeDivergencia.SemReexecucao(copia.Requisicao, doLegado.Status, doLegado.Corpo, doNovo.Status, doNovo.Corpo)
                 ?? (await ReexecutarAsync(copia, urlDoNovo, ct).ConfigureAwait(false), null);
 
             Registrar(span, operacao, classe);
+            string reproducao = await cofre.GuardarAsync(copia, traceId, ct).ConfigureAwait(false);
             Log.SombraDivergente(
                 logger, operacao, ClassificadorDeDivergencia.Nome(classe), regra ?? "-", traceId,
-                copia.StatusLegado, doNovo.Status, Sha256(copia.RespostaLegado), Sha256(doNovo.Corpo),
-                string.Join(' ', DiferencaXml.Caminhos(copia.RespostaLegado, doNovo.Corpo)),
-                Pseudonimizador.Requisicao(copia.Requisicao, opcoes.CurrentValue.ChaveHmac) ?? "omitida");
+                doLegado.Status, doNovo.Status, Sha256(doLegado.Corpo), Sha256(doNovo.Corpo),
+                string.Join(' ', DiferencaXml.Caminhos(doLegado.Corpo, doNovo.Corpo)),
+                Pseudonimizador.Requisicao(copia.Requisicao, opcoes.CurrentValue.ChaveHmac) ?? "omitida",
+                TelemetriaDaSombra.Modo(copia),
+                reproducao);
         }
         finally
         {

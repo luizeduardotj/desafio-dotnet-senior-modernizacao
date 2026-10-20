@@ -25,7 +25,7 @@ Falha no novo:
 
 ## Sombra
 
-Implementa as seções 1 a 5 da [ADR-0009](../../docs/adr/0009-sombra-escrita-unica-e-idempotencia.md). O código fica em [`Sombra/`](Sombra). As leituras (`ConsultarNfse`, `ConsultarNfseServicoTomado`) são repetidas no novo e comparadas em bytes. O `CancelarNfse` só é avaliado pelo novo, sem escrita ([Sombra do cancelamento](#sombra-do-cancelamento)).
+Implementa as seções 1 a 5 e 7 da [ADR-0009](../../docs/adr/0009-sombra-escrita-unica-e-idempotencia.md). O código fica em [`Sombra/`](Sombra). As leituras (`ConsultarNfse`, `ConsultarNfseServicoTomado`) são repetidas no novo e comparadas em bytes. O `CancelarNfse` só é avaliado pelo novo, sem escrita ([Sombra do cancelamento](#sombra-do-cancelamento)). Em `novo`, as leituras podem ter a [sombra invertida](#sombra-invertida-m3m4).
 
 ```mermaid
 sequenceDiagram
@@ -81,20 +81,60 @@ sequenceDiagram
 
 - **Caminho do cliente:** o mesmo das leituras (passos 1 a 3): elegibilidade, captura, chave rara depois da resposta (`E050`, `E051`, `E053` e `E001` vão sempre) e canal. O mesmo pool de workers atende as três operações, com um caminho por operação ([`AvaliadorDoCancelamento`](Sombra/AvaliadorDoCancelamento.cs)).
 - **Contrato:** `POST {Novo__UrlInterna}/interno/sombra/cancelamento` com JSON `{ "envelope", "respostaLegado", "statusLegado", "idadeMs" }`. `envelope` e `respostaLegado` são os corpos brutos, em claro, pela rede interna (nunca vão ao log). `idadeMs` é o tempo, no `Stopwatch` da fachada, entre o recebimento da requisição do ERP e o envio da cópia: o novo reconstrói `T0` no relógio do banco sem comparar relógios de máquinas diferentes. Um `soap:Fault` do legado também vai, com `statusLegado` 500: o novo devolve `indeterminado`.
-- **Resposta:** 200 com `{ "resultado": "igual" | "divergente", "classe", "decisaoLegado", "decisaoNovo" }`. A classe vem do novo (`nao_classificada`, `corrida`, `fronteira_relogio`, `indeterminado` ou `decisao_consciente`; `null` vale `nao_classificada`). Outro status, timeout (`Sombra__Timeout`), erro de transporte, JSON inválido, ou resultado ou classe fora da lista viram `erro_novo` (um valor desconhecido nunca vira label).
+- **Resposta:** 200 com `{ "resultado": "igual" | "divergente", "classe", "decisaoLegado", "decisaoNovo", "cnpjConfere" }`. `cnpjConfere` é opcional e alimenta a [métrica do CNPJ](#cnpj-inconsistente-c18k04). A classe vem do novo (`nao_classificada`, `corrida`, `fronteira_relogio`, `indeterminado` ou `decisao_consciente`; `null` vale `nao_classificada`). Outro status, timeout (`Sombra__Timeout`), erro de transporte, JSON inválido, ou resultado ou classe fora da lista viram `erro_novo` (um valor desconhecido nunca vira label).
 - **Sem `Novo__UrlInterna`:** a cópia sorteada é descartada com motivo `sem_url_interna` e o novo não é chamado.
 - **Registro:** "igual" em `Debug` (evento 20). Na divergência, `Warning` (evento 25) com classe, `traceId`, as decisões dos dois lados (só se forem códigos curtos, como `E053` ou `sucesso`; senão `?`), o status e o SHA-256 da resposta do legado e o pedido pseudonimizado como nas leituras. O `erro_novo` sai no evento 22.
-- **Modo `novo`:** nada muda. O cancelamento vai só ao novo, sem retry nem fallback depois do envio, e não há sombra invertida (fase 2).
+- **Modo `novo`:** nada muda. O cancelamento vai só ao novo, sem retry nem fallback depois do envio. A [sombra invertida](#sombra-invertida-m3m4) é proibida no cancelamento.
+
+### Sombra invertida (M3/M4)
+
+Em `novo`, com `"Sombra": { "Invertida": true, "Amostragem": N }` na operação, o **novo responde ao cliente** e a leitura é repetida no legado, para comparação (ADR-0009, seção 7). É a rede de segurança do M3/M4, quando o legado já não é a resposta do cliente.
+
+- O caminho é o mesmo da sombra direta, com os lados trocados: tee da resposta do novo, sorteio depois da resposta (amostragem e chaves raras), canal, worker, comparação, reexecução dos dois lados e classe. O registro da divergência leva `modo sombra_invertida`, e o span também.
+- Se o novo falhou e houve fallback, quem respondeu foi o legado, e não há cópia. Falha do legado na cópia é descarte (`erro_legado`), não divergência.
+- **Só leituras.** Repetir um `CancelarNfse` no legado cancelaria de novo. Por isso há três travas, cada uma com teste ([`SombraInvertidaTests`](../../tests/Nfse.Fachada.Testes/Integracao/SombraInvertidaTests.cs)):
+  - `Invertida` em `CancelarNfse` invalida o retrato das flags, em qualquer modo, e tudo vai ao legado (fail-safe);
+  - o encaminhador só instala a cópia invertida em leitura ([`PublicadorDaSombra.CopiavelInvertida`](Sombra/PublicadorDaSombra.cs));
+  - o worker descarta (`invertida_proibida`) uma cópia invertida de cancelamento.
+- `Invertida` é ignorada fora de `novo`. No OpenFeature, é um booleano dentro de `Sombra` no objeto `<Operacao>.config`.
+
+### CNPJ inconsistente (C18/K04)
+
+O legado identifica o prestador só pela IM e ignora o CNPJ do pedido (ADR-0004, C18 e K04). Antes de decidir se uma validação futura quebraria ERPs, a sombra mede quantos pedidos trazem um CNPJ diferente do cadastrado para a IM. A medida não consulta o banco nem passa pelo caminho do cliente ([`ConferenciaDeCnpj`](Sombra/ConferenciaDeCnpj.cs)):
+
+- **`ConsultarNfse`:** o worker compara o `Prestador/Cnpj` do pedido com o `PrestadorServico/IdentificacaoPrestador/Cnpj` da primeira nota da resposta. O legado preenche esse campo com o documento do cadastro (join com `CONTRIBUINTES`). A conferência acontece antes de chamar o novo, então também vale quando o novo falha.
+- **`CancelarNfse`:** a resposta do legado só ecoa o pedido (K10). O novo já lê o cadastro pela IM na avaliação e devolve `cnpjConfere` (`true`, `false` ou ausente), sem o documento.
+- A comparação usa só os dígitos e ignora zeros à esquerda. Pedido sem CNPJ, ou resposta sem nota (`E010`, `E040`, Fault), não conta. `ConsultarNfseServicoTomado` não tem prestador.
+- A taxa é `soap_cnpj_inconsistente_total / soap_cnpj_conferido_total` **da amostra**, e as chaves raras (sempre copiadas) puxam a taxa para os casos de erro. Com tudo em `legado` não há cópia: para medir no M0, ponha a operação em `sombra` com amostragem baixa.
 
 ### Registro da divergência
 
-É um log `Warning` (evento 21 nas leituras, 25 no cancelamento), nunca gravado no Oracle. Leva operação, classe, regra, `traceId` da requisição original, status dos dois lados, SHA-256 de cada resposta, até 10 caminhos XPath divergentes do `outputXML` ([`DiferencaXml`](Sombra/DiferencaXml.cs), que usa o envelope quando não há `outputXML`, como num Fault) e a requisição pseudonimizada ([`Pseudonimizador`](Sombra/Pseudonimizador.cs)).
+É um log `Warning` (evento 21 nas leituras, 25 no cancelamento), nunca gravado no Oracle. Leva operação, classe, regra, `traceId` da requisição original, status dos dois lados, SHA-256 de cada resposta, até 10 caminhos XPath divergentes do `outputXML` ([`DiferencaXml`](Sombra/DiferencaXml.cs), que usa o envelope quando não há `outputXML`, como num Fault) a requisição pseudonimizada ([`Pseudonimizador`](Sombra/Pseudonimizador.cs)), o modo (`sombra` ou `sombra_invertida`, só nas leituras) e o identificador da [reprodução cifrada](#reprodução-cifrada) (`-` quando desligada).
 
 **Pseudonimização.** Cada valor do `inputXML` vira `hmac:` seguido do HMAC-SHA256 em hexadecimal, com a chave `Sombra__ChaveHmac`. A regra é uma lista de permissão: só `Numero`, `NumeroNfse`, `DataInicial`, `DataFinal` e `Pagina` ficam em claro. CPF/CNPJ, razões sociais, IM e qualquer outro campo saem pseudonimizados.
 
 - Sem chave, ou com pedido malformado (por exemplo, com DTD), a requisição aparece como `omitida` e o registro leva só os hashes.
 - As respostas nunca entram no log.
 - O "igual" e os descartes saem em `Debug`.
+
+### Reprodução cifrada
+
+Opcional e **desligada por padrão** (ADR-0009, seção 4, fase 2). A pseudonimização basta para reproduzir com o seed. Quando não basta, por exemplo num caso que depende do documento exato, cada divergência pode gravar o pedido original cifrado ([`Sombra/Reproducao`](Sombra/Reproducao)):
+
+- **Formato:** AES-256-GCM, com nonce aleatório. Versão, identificador, operação, `traceId`, instante e `ChaveId` ficam em claro e entram como dado associado ([`EnvelopeCifrado`](Sombra/Reproducao/EnvelopeCifrado.cs)). Cifrados ficam o pedido, `SOAPAction`, `Content-Type`, o status e o SHA-256 da resposta que o cliente recebeu. A resposta inteira só vai no `CancelarNfse`, porque o novo precisa dela para reavaliar a decisão. A página de uma leitura não é guardada: minimização.
+- **Gravação:** feita pelos workers ([`CofreDeReproducao`](Sombra/Reproducao/CofreDeReproducao.cs)), depois da classificação. Cada arquivo é escrito num temporário e renomeado para `<instante>-<guid>.nfse-repro.json`, com permissão `0600`. Vão no máximo `PorSegundo` arquivos por operação, para um novo com defeito não encher o disco. O log da divergência leva só o nome (`reprodução <id>`), sem dado pessoal. Falha de disco vira `sombra_reproducoes_total{resultado=erro}` e o evento 26, sem caminho nem conteúdo.
+- **Retenção:** a [`LimpezaDaReproducao`](Sombra/Reproducao/LimpezaDaReproducao.cs) apaga, a cada hora, o que tem mais de `Retencao` (15 dias), e os temporários órfãos com mais de uma hora. O instante sai do nome, sem abrir o arquivo.
+- **Chave:** a fachada só tem a atual (`ChaveId` e `Chave`, por Secret). Para rotacionar, troque os dois. A chave anterior vai só para a ferramenta (`ChavesAnteriores__<id>`) até o último arquivo dela expirar, e depois é destruída. Quem pode ter a chave está na ADR-0012 (Segurança e LGPD).
+
+Reprodução, na mesma imagem da fachada, num Job do papel de operação:
+
+```bash
+dotnet Nfse.Fachada.dll reproduzir reexecutar /dados/20261019T150000Z-<guid>.nfse-repro.json --legado http://webservices:8080 --novo http://nfse-novo:8080
+```
+
+- **Leitura:** reenvia o mesmo `POST /NfseWS.asmx` aos dois lados e compara em bytes. Mostra o status e o SHA-256 de cada lado, se o lado que respondeu ao cliente ainda devolve o mesmo e os caminhos XPath que divergem. Nunca mostra o conteúdo. Sai com 0 (igual), 1 (divergente), 2 (uso ou chave) ou 3 (rede).
+- **`CancelarNfse`:** **nunca** vai ao SOAP de nenhum lado. Só `--novo-interno http://nfse-novo:8081`, que reavalia a decisão sem escrita com a resposta do legado guardada. `idadeMs` é o tempo desde a gravação. Se o estado da nota mudou desde então, o resultado aparece como `corrida`.
+- **`decifrar <arquivo> --saida <dir>`:** grava o pedido (e, no cancelamento, a resposta) em claro, com permissão `0600`, só no diretório indicado. É para um ambiente restrito: apague ao terminar.
 
 **Limitações.** A classificação da fachada só olha o protocolo (Fault, DTD). As classes de negócio do cancelamento (`fronteira_relogio`, `indeterminado`) são do serviço novo (ADR-0008). A sombra do cancelamento valida a decisão, não o `DataHora`. Ainda não há unidade de amostra por (chave, operação, resposta, dia) nem acúmulo estatístico (plano, §5.2 e §5.3): isso fica na análise das métricas e dos logs. O sorteio da amostragem é por requisição, não por chave.
 
@@ -120,6 +160,12 @@ sequenceDiagram
 | `Sombra__ReexecucoesPorSegundo` | `1` | reexecuções de divergência por segundo, por operação; `0` desliga |
 | `Sombra__ChavesRaras__0`, `__1`, ... | `E001`, `E030`, `E050`, `E051`, `E053` | códigos que vão sempre para a sombra |
 | `Sombra__ChaveHmac` | — | segredo do HMAC da pseudonimização; vazio, o registro leva só os hashes |
+| `Sombra__Reproducao__Habilitada` | `false` | grava o pedido cifrado de cada divergência ([Reprodução cifrada](#reprodução-cifrada)) |
+| `Sombra__Reproducao__Diretorio` | — | volume só da fachada; obrigatório se habilitada |
+| `Sombra__Reproducao__ChaveId` / `Sombra__Reproducao__Chave` | — | identificador (`[A-Za-z0-9_-]{1,32}`) e chave AES-256 em base64, de segredo; obrigatórios se habilitada, senão o processo não sobe |
+| `Sombra__Reproducao__Retencao` | `15.00:00:00` | idade máxima de um arquivo; a limpeza roda a cada `Sombra__Reproducao__IntervaloDaLimpeza` (1 h) |
+| `Sombra__Reproducao__PorSegundo` | `1` | arquivos gravados por segundo, por operação; `0` não grava |
+| `Sombra__Reproducao__ChavesAnteriores__<id>` | — | **só na ferramenta**: chaves rotacionadas ainda na retenção |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | coletor OTLP (no compose, `http://otel-lgtm:4317`); sem ela, nada é exportado |
 
 ## Flags
@@ -147,7 +193,8 @@ No arquivo, as flags ficam na seção `Migracao`. O arquivo é observado e recar
 ```
 
 - Uma operação ausente fica em `legado`.
-- `Percentual` só vale em `novo`. `Sombra.Amostragem` só vale em `sombra`, nas três operações.
+- `Percentual` só vale em `novo`. `Sombra.Amostragem` vale em `sombra`, nas três operações, e em `novo` com `Sombra.Invertida` ([sombra invertida](#sombra-invertida-m3m4), só nas leituras).
+- `Sombra.Invertida` em `CancelarNfse` invalida o arquivo inteiro (fail-safe): seria escrita dupla.
 - As listas contêm IMs (ou documentos só com dígitos, em `ConsultarNfseServicoTomado`).
 - **Fail-safe:** com arquivo ausente, JSON inválido, valor que não converte (`"Modo": "talvez"`) ou percentual fora de 0..100, a fonte devolve `null`. Nesse caso tudo vai ao legado e `/health/ready` responde 503.
 
@@ -161,7 +208,7 @@ Com `Flags__Fonte=openfeature`, o mesmo retrato `FlagsDeMigracao` vem de flags O
 | --- | --- | --- |
 | `migracao.kill-switch` | booleano | `Migracao.KillSwitch` |
 | `<Operacao>.kill-switch` | booleano | `Operacoes.<Operacao>.KillSwitch` |
-| `<Operacao>.config` | objeto `{ Modo, Percentual, Inclusao, Exclusao, Sombra: { Amostragem } }` | o resto de `Operacoes.<Operacao>` |
+| `<Operacao>.config` | objeto `{ Modo, Percentual, Inclusao, Exclusao, Sombra: { Amostragem, Invertida } }` | o resto de `Operacoes.<Operacao>` |
 
 `<Operacao>` é `ConsultarNfse`, `ConsultarNfseServicoTomado` ou `CancelarNfse`. Por que este esquema:
 
@@ -218,9 +265,12 @@ curl           -H "X-Admin-Token: $TOKEN" http://fachada:8081/admin/kill-switch 
 | `kill_switch_ativo` (gauge) | — | 1 se algum kill switch, do arquivo ou administrativo, está ligado |
 | `sombra_comparacoes_total` | `operacao`, `resultado` (`igual`, `divergente`) | comparações em bytes de corpo e status (leituras) ou o resultado da avaliação do novo (cancelamento) |
 | `sombra_divergencias_total` | `operacao`, `classe` | divergências e falhas do novo, por classe automática (no cancelamento, a devolvida pelo novo) |
-| `sombra_descartadas_total` | `operacao`, `motivo` | cópias amostradas e não comparadas (`canal_cheio`, `resposta_grande`, `requisicao_grande`, `falha_legado`, `novo_nao_configurado`, `sem_url_interna`) |
+| `sombra_descartadas_total` | `operacao`, `motivo` | cópias amostradas e não comparadas (`canal_cheio`, `resposta_grande`, `requisicao_grande`, `falha_legado`, `novo_nao_configurado`, `sem_url_interna`; na sombra invertida, `falha_novo`, `erro_legado` e `invertida_proibida`) |
 | `sombra_reexecucoes_total` | `operacao`, `resultado` (`coincidiu`, `divergiu`, `erro`, `limitada`) | custo da reexecução; nunca existe para `CancelarNfse` |
 | `sombra_atraso` | `operacao` | de `T0` ao fim da comparação |
+| `sombra_reproducoes_total` | `operacao`, `resultado` (`guardada`, `limitada`, `erro`) | arquivos de [reprodução cifrada](#reprodução-cifrada) |
+| `soap_cnpj_conferido_total` | `operacao` | cópias da sombra cujo CNPJ do prestador foi conferido com o cadastro da IM (C18/K04) |
+| `soap_cnpj_inconsistente_total` | `operacao` | dessas, as que trazem CNPJ diferente do cadastrado ([CNPJ inconsistente](#cnpj-inconsistente-c18k04)) |
 
 - `modo` vale `legado`, `sombra`, `novo` ou `indisponivel` (flags não lidas). Operação fora do escopo conta como `legado` e operação desconhecida aparece como `desconhecida`.
 - `resultado` vale `ok` (2xx) ou `fault` (o resto). `erro_negocio` ainda não existe, porque exige ler o corpo da resposta (ver TODO).
@@ -240,6 +290,8 @@ curl           -H "X-Admin-Token: $TOKEN" http://fachada:8081/admin/kill-switch 
 - [x] **Sombra das leituras** (ADR-0009, seções 1, 2 e 4).
 - [x] **Sombra do cancelamento** (ADR-0009, seção 3): requisição, resposta e `idadeMs` ao `POST /interno/sombra/cancelamento` do novo, que avalia sem escrever.
 - [ ] Janela do prazo como chave rara (plano, §5.4), junto da sombra do cancelamento.
-- [ ] Payload cifrado (AES-GCM) para reprodução exata (ADR-0009, fase 2).
+- [x] **Payload cifrado** (AES-GCM) para reprodução exata e ferramenta `reproduzir` (ADR-0009, fase 2), desligado por padrão ([Reprodução cifrada](#reprodução-cifrada)). Falta, no deploy: volume e Secret da chave.
+- [x] **Sombra invertida** das leituras em `novo` (ADR-0009, seção 7), proibida no cancelamento.
+- [x] **`soap_cnpj_inconsistente_total`** (ADR-0004, C18/K04), medida na sombra.
 - [ ] Timeout total (não só de inatividade) por operação no novo, se a medição do M0 mostrar necessidade.
 - [x] [Dockerfile](Dockerfile) e serviço `fachada` no [`docker-compose.yml`](../../docker-compose.yml), com as flags montadas de [`deploy/flags`](../../deploy/flags/flags.json).

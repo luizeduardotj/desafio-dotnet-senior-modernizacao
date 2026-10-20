@@ -43,6 +43,13 @@ public sealed record AvaliacaoDaSombra(
     ClasseDeSombra? Classe)
 {
     public bool Igual => Classe is null && DecisaoLegado == DecisaoNovo;
+
+    /// <summary>
+    /// O documento informado no pedido é o do cadastro do prestador da IM (C18/K04: o legado não confere)?
+    /// <see langword="null"/> quando não há o que conferir: prestador não encontrado, pedido ou cadastro sem documento.
+    /// Só o resultado sai daqui, nunca o documento.
+    /// </summary>
+    public bool? DocumentoConfere { get; init; }
 }
 
 /// <summary>
@@ -55,10 +62,11 @@ public sealed class SombraDoCancelamento(IContribuintes contribuintes, ILeituraP
     /// <summary>Folga para o truncamento de <c>DATE</c> em segundos e a diferença entre duas leituras de <c>SYSDATE</c>.</summary>
     public static readonly TimeSpan Tolerancia = TimeSpan.FromSeconds(2);
 
+    /// <param name="documentoInformado">CNPJ do prestador como veio no pedido; só é conferido com o cadastro.</param>
     /// <param name="idade">Tempo entre o recebimento do pedido na fachada e o envio da cópia, medido lá.</param>
     public async Task<AvaliacaoDaSombra> AvaliarAsync(
-        string inscricaoMunicipal, long numero, RespostaObservada observada, DateTime? dataHoraObservada, TimeSpan idade,
-        CancellationToken cancellationToken)
+        string inscricaoMunicipal, long numero, string? documentoInformado, RespostaObservada observada, DateTime? dataHoraObservada,
+        TimeSpan idade, CancellationToken cancellationToken)
     {
         PrestadorLido? prestador = string.IsNullOrEmpty(inscricaoMunicipal)
             ? null
@@ -68,6 +76,27 @@ public sealed class SombraDoCancelamento(IContribuintes contribuintes, ILeituraP
             return new AvaliacaoDaSombra(false, null, null, null);
         }
 
+        // O cadastro já foi lido para achar o prestador: conferir o documento não custa outra leitura.
+        AvaliacaoDaSombra avaliacao = await AvaliarComPrestadorAsync(prestador, numero, observada, dataHoraObservada, idade, cancellationToken)
+            .ConfigureAwait(false);
+        return avaliacao with { DocumentoConfere = Conferir(documentoInformado, prestador.Documento) };
+    }
+
+    /// <summary>Iguais só nos dígitos e sem zeros à esquerda: um ERP que omite o zero inicial não conta como divergente.</summary>
+    public static bool? Conferir(string? informado, string? cadastrado)
+    {
+        string a = SoDigitosSemZerosAEsquerda(informado);
+        string b = SoDigitosSemZerosAEsquerda(cadastrado);
+        return a.Length == 0 || b.Length == 0 ? null : a == b;
+    }
+
+    private static string SoDigitosSemZerosAEsquerda(string? documento) =>
+        string.Concat((documento ?? "").Where(char.IsAsciiDigit)).TrimStart('0');
+
+    private async Task<AvaliacaoDaSombra> AvaliarComPrestadorAsync(
+        PrestadorLido prestador, long numero, RespostaObservada observada, DateTime? dataHoraObservada, TimeSpan idade,
+        CancellationToken cancellationToken)
+    {
         if (observada == RespostaObservada.Fault)
         {
             // K09/K11: o legado pode ter comitado antes de falhar; não há como saber o estado anterior.

@@ -1,3 +1,5 @@
+using Nfse.Fachada.Roteamento;
+
 namespace Nfse.Fachada.Flags;
 
 public enum ModoDeMigracao
@@ -35,6 +37,13 @@ public sealed class FlagsDeMigracao
             {
                 yield return $"{nome}: Sombra.Amostragem fora de 0..100";
             }
+
+            // Sombra invertida repetiria no legado o que o novo já fez. Para o cancelamento seria escrita dupla
+            // (ADR-0009, seção 5): o retrato inteiro é recusado e tudo vai ao legado (fail-safe), em qualquer modo.
+            if (op.Sombra.Invertida && string.Equals(nome, OperacoesSoap.CancelarNfse, StringComparison.Ordinal))
+            {
+                yield return $"{nome}: Sombra.Invertida proibida (o legado cancelaria de novo)";
+            }
         }
     }
 }
@@ -64,6 +73,16 @@ public sealed class FlagsDaOperacao
 
 public sealed class FlagsDaSombra
 {
-    /// <summary>Fração (0..100) das requisições elegíveis copiadas para o novo. A sombra ainda não está implementada.</summary>
+    /// <summary>
+    /// Fração (0..100) das requisições copiadas: em <c>sombra</c>, as atendidas pelo legado e repetidas no novo; com
+    /// <see cref="Invertida"/>, as atendidas pelo novo e repetidas no legado.
+    /// </summary>
     public int Amostragem { get; set; }
+
+    /// <summary>
+    /// Sombra invertida (ADR-0009, fase 2): em <c>novo</c>, o novo responde ao cliente e a leitura é repetida no legado
+    /// para comparação, como rede de segurança no M3/M4. Só leituras: em <c>CancelarNfse</c> o retrato é inválido.
+    /// Ignorada fora de <c>novo</c>.
+    /// </summary>
+    public bool Invertida { get; set; }
 }

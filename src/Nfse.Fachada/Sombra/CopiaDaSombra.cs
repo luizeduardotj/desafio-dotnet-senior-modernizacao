@@ -10,17 +10,21 @@ namespace Nfse.Fachada.Sombra;
 /// <param name="SoapAction">Header como o cliente mandou, reenviado ao novo.</param>
 /// <param name="ContentType">Content-Type da requisição original.</param>
 /// <param name="Requisicao">Corpo bufferizado da requisição.</param>
-/// <param name="StatusLegado">Status HTTP que o cliente recebeu.</param>
-/// <param name="RespostaLegado">Corpo que o cliente recebeu.</param>
+/// <param name="Status">Status HTTP que o cliente recebeu: do legado, ou do novo se <paramref name="Invertida"/>.</param>
+/// <param name="Resposta">Corpo que o cliente recebeu: do legado, ou do novo se <paramref name="Invertida"/>.</param>
 /// <param name="T0">Recebimento da requisição (<see cref="Stopwatch.GetTimestamp"/>), base de <c>sombra_atraso</c> e da
 /// <c>idadeMs</c> do cancelamento.</param>
 /// <param name="Origem">Contexto do trace da requisição original, para o span link.</param>
+/// <param name="Invertida">
+/// Sombra invertida (só leituras): o novo respondeu ao cliente e a leitura é repetida no legado. Nunca em <c>CancelarNfse</c>.
+/// </param>
 public sealed record CopiaDaSombra(
     string Operacao,
     string SoapAction,
     string? ContentType,
     byte[] Requisicao,
-    int StatusLegado,
-    byte[] RespostaLegado,
+    int Status,
+    byte[] Resposta,
     long T0,
-    ActivityContext Origem);
+    ActivityContext Origem,
+    bool Invertida = false);

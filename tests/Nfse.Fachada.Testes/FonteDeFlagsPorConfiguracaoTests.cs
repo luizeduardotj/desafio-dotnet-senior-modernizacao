@@ -61,11 +61,35 @@ public sealed class FonteDeFlagsPorConfiguracaoTests : IDisposable
     [InlineData("""{ "Migracao": { "Operacoes": { "ConsultarNfse": { "Modo": "novo", "Percentual": 101 } } } }""")]
     [InlineData("""{ "Migracao": { "Operacoes": { "ConsultarNfse": { "Modo": "sombra", "Sombra": { "Amostragem": -1 } } } } }""")]
     [InlineData("""{ "Migracao": { "KillSwitch": "sim" } }""")]
+    [InlineData("""{ "Migracao": { "Operacoes": { "CancelarNfse": { "Modo": "novo", "Percentual": 100, "Sombra": { "Invertida": true } } } } }""")]
+    [InlineData("""{ "Migracao": { "Operacoes": { "CancelarNfse": { "Modo": "sombra", "Sombra": { "Invertida": true } } } } }""")]
     [InlineData("isto não é json")]
     public void Flags_invalidas_ou_ausentes_viram_null(string conteudo)
     {
         File.WriteAllText(Arquivo, conteudo);
         Assert.Null(Criar().Atual());
+    }
+
+    [Fact]
+    public void Sombra_invertida_das_leituras_e_lida_do_arquivo()
+    {
+        File.WriteAllText(Arquivo, """{ "Migracao": { "Operacoes": { "ConsultarNfse": { "Modo": "novo", "Percentual": 100, "Sombra": { "Amostragem": 5, "Invertida": true } } } } }""");
+        FlagsDeMigracao? flags = Criar().Atual();
+
+        Assert.NotNull(flags);
+        Assert.True(flags.Da("ConsultarNfse").Sombra.Invertida);
+        Assert.Equal(5, flags.Da("ConsultarNfse").Sombra.Amostragem);
+        Assert.False(flags.Da("CancelarNfse").Sombra.Invertida);
+    }
+
+    [Fact]
+    public void Sombra_invertida_no_cancelamento_e_recusada_com_o_motivo()
+    {
+        var flags = new FlagsDeMigracao();
+        flags.Operacoes["CancelarNfse"] = new FlagsDaOperacao { Modo = ModoDeMigracao.Novo, Percentual = 100, Sombra = { Invertida = true } };
+        flags.Operacoes["ConsultarNfse"] = new FlagsDaOperacao { Modo = ModoDeMigracao.Novo, Percentual = 100, Sombra = { Invertida = true } };
+
+        Assert.Equal(["CancelarNfse: Sombra.Invertida proibida (o legado cancelaria de novo)"], flags.Validar());
     }
 
     [Fact]

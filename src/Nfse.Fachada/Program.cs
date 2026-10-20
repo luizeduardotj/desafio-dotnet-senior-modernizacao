@@ -8,7 +8,15 @@ using Nfse.Fachada.Encaminhamento;
 using Nfse.Fachada.Flags;
 using Nfse.Fachada.Observabilidade;
 using Nfse.Fachada.Sombra;
+using Nfse.Fachada.Sombra.Reproducao;
 using Nfse.Observabilidade;
+
+// Ferramenta de reprodução de divergência (ADR-0009, fase 2), na mesma imagem: não sobe o servidor.
+if (args is [FerramentaDeReproducao.Comando, ..])
+{
+    Environment.ExitCode = await FerramentaDeReproducao.ExecutarAsync(args[1..], Console.Out, CancellationToken.None).ConfigureAwait(false);
+    return;
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -78,6 +86,9 @@ builder.Services.AddSingleton<CanalDaSombra>();
 builder.Services.AddSingleton<PublicadorDaSombra>();
 builder.Services.AddSingleton<ComparadorDaSombra>();
 builder.Services.AddSingleton<AvaliadorDoCancelamento>();
+builder.Services.AddOptions<OpcoesReproducao>().BindConfiguration(OpcoesReproducao.Secao).ValidateDataAnnotations().ValidateOnStart();
+builder.Services.AddSingleton<CofreDeReproducao>();
+builder.Services.AddHostedService<LimpezaDaReproducao>();
 builder.Services.AddHostedService<TrabalhadorDaSombra>();
 builder.Services.AddSingleton<MedidoresDeEstado>();
 builder.Services.AddHealthChecks().AddCheck<FlagsCarregadasHealthCheck>("flags", tags: ["ready"]);

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using Nfse.Fachada.Configuracao;
+using Nfse.Fachada.Flags;
 using Nfse.Fachada.Observabilidade;
 using Nfse.Fachada.Roteamento;
 using Yarp.ReverseProxy.Forwarder;
@@ -30,7 +31,33 @@ public sealed class PublicadorDaSombra(
     /// <param name="requisicao">Corpo bufferizado; <c>null</c> se passou do limite.</param>
     /// <param name="captura">Captura da resposta do legado; <c>null</c> se não houve corpo para copiar.</param>
     /// <param name="t0">Recebimento da requisição.</param>
-    internal void AvaliarDepoisDoLegado(HttpContext ctx, string operacao, int amostragem, ReadOnlyMemory<byte>? requisicao, CapturaDaResposta? captura, long t0)
+    internal void AvaliarDepoisDoLegado(HttpContext ctx, string operacao, int amostragem, ReadOnlyMemory<byte>? requisicao, CapturaDaResposta? captura, long t0) =>
+        AvaliarDepoisDaResposta(ctx, operacao, amostragem, requisicao, captura, t0, invertida: false);
+
+    /// <summary>
+    /// Sombra invertida (ADR-0009, fase 2): em <c>novo</c>, com <c>Sombra.Invertida</c>, o novo responde ao cliente e a
+    /// leitura é repetida no legado pelos workers. <b>Só leituras</b>: repetir um <c>CancelarNfse</c> no legado
+    /// cancelaria de novo (escrita dupla, seção 5). A validação das flags já recusa a combinação; esta checagem é a
+    /// segunda trava, para um retrato que chegue sem validação.
+    /// </summary>
+    public static bool CopiavelInvertida(string operacao, FlagsDeMigracao? flags) =>
+        OperacoesSoap.EstaEmEscopo(operacao)
+        && !string.Equals(operacao, OperacoesSoap.CancelarNfse, StringComparison.Ordinal)
+        && flags?.Da(operacao) is { Modo: ModoDeMigracao.Novo, Sombra.Invertida: true };
+
+    /// <summary>Depois que o novo respondeu ao cliente sem fallback, em sombra invertida.</summary>
+    internal void AvaliarDepoisDoNovo(HttpContext ctx, string operacao, int amostragem, ReadOnlyMemory<byte>? requisicao, CapturaDaResposta? captura, long t0)
+    {
+        if (string.Equals(operacao, OperacoesSoap.CancelarNfse, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        AvaliarDepoisDaResposta(ctx, operacao, amostragem, requisicao, captura, t0, invertida: true);
+    }
+
+    private void AvaliarDepoisDaResposta(
+        HttpContext ctx, string operacao, int amostragem, ReadOnlyMemory<byte>? requisicao, CapturaDaResposta? captura, long t0, bool invertida)
     {
         byte[]? resposta = captura?.Bytes;
 
@@ -48,7 +75,7 @@ public sealed class PublicadorDaSombra(
         }
         else if (ctx.Features.Get<IForwarderErrorFeature>() is not null || ctx.RequestAborted.IsCancellationRequested)
         {
-            motivo = "falha_legado";
+            motivo = invertida ? "falha_novo" : "falha_legado";
         }
         else if (requisicao is null)
         {
@@ -68,7 +95,8 @@ public sealed class PublicadorDaSombra(
                 ctx.Response.StatusCode,
                 resposta,
                 t0,
-                Activity.Current?.Context ?? default);
+                Activity.Current?.Context ?? default,
+                invertida);
             if (!canal.TentarPublicar(copia))
             {
                 motivo = "canal_cheio";

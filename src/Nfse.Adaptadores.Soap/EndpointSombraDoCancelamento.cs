@@ -13,7 +13,12 @@ namespace Nfse.Adaptadores.Soap;
 /// <summary>Pedido da fachada para avaliar, sem escrever, um cancelamento que o legado já atendeu (ADR-0009 §3).</summary>
 public sealed record PedidoDeSombraDoCancelamento(string Envelope, string RespostaLegado, int StatusLegado, long IdadeMs);
 
-public sealed record ResultadoDeSombraDoCancelamento(string Resultado, string? Classe, string? DecisaoLegado, string? DecisaoNovo);
+/// <param name="CnpjConfere">
+/// O CNPJ do pedido é o do cadastro da IM (C18/K04, ADR-0004)? A fachada conta em <c>soap_cnpj_inconsistente_total</c>.
+/// <see langword="null"/> quando não há o que conferir. Nunca leva o documento.
+/// </param>
+public sealed record ResultadoDeSombraDoCancelamento(
+    string Resultado, string? Classe, string? DecisaoLegado, string? DecisaoNovo, bool? CnpjConfere = null);
 
 /// <summary>
 /// <c>POST /interno/sombra/cancelamento</c>. Só responde na porta interna; o caso de uso lê pelo usuário só leitura.
@@ -60,7 +65,7 @@ public static partial class EndpointSombraDoCancelamento
 
         (RespostaObservada observada, DateTime? dataHora) = Observar(legado);
         AvaliacaoDaSombra avaliacao = await sombra.AvaliarAsync(
-            cancelamento.InscricaoMunicipal ?? "", cancelamento.Numero, observada, dataHora, TimeSpan.FromMilliseconds(pedido.IdadeMs), cancellationToken)
+            cancelamento.InscricaoMunicipal ?? "", cancelamento.Numero, cancelamento.Cnpj, observada, dataHora, TimeSpan.FromMilliseconds(pedido.IdadeMs), cancellationToken)
             .ConfigureAwait(false);
 
         if (!avaliacao.PrestadorEncontrado)
@@ -91,7 +96,8 @@ public static partial class EndpointSombraDoCancelamento
             classe is null ? "igual" : "divergente",
             classe,
             decisaoLegado ?? avaliacao?.DecisaoLegado?.ToString(),
-            decisaoNovo ?? avaliacao?.DecisaoNovo?.ToString()));
+            decisaoNovo ?? avaliacao?.DecisaoNovo?.ToString(),
+            avaliacao?.DocumentoConfere));
 
     private static (RespostaObservada, DateTime?) Observar(string legado)
     {

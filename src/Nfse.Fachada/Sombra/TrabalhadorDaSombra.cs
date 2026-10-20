@@ -25,6 +25,14 @@ internal sealed class TrabalhadorDaSombra(
         {
             await foreach (CopiaDaSombra copia in canal.Leitor.ReadAllAsync(ct).ConfigureAwait(false))
             {
+                if (copia.Invertida && !OperacoesSoap.EhLeitura(copia.Operacao))
+                {
+                    // Terceira trava da sombra invertida: um cancelamento nunca é repetido (ADR-0009, seção 5).
+                    TelemetriaDaSombra.ContarDescarte(copia.Operacao, "invertida_proibida");
+                    Log.SombraDescartada(logger, copia.Operacao, "invertida_proibida");
+                    continue;
+                }
+
                 try
                 {
                     await (OperacoesSoap.EhLeitura(copia.Operacao)
