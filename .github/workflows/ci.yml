@@ -70,7 +70,7 @@ jobs:
           NFSE_PARIDADE_ORACLE: "User Id=NFSE_MODERNO_APP;Password=moderno_app_dev_123;Data Source=127.0.0.1:1521/FREEPDB1"
         run: tests/paridade/cancelamento-fixed-date.sh
       - name: K08 corrigido pelo wrapper (dois cancelamentos paralelos, um UPDATE)
-        # Escreve: cancela a nota 27/5, que nenhum caso do corpus usa, com o relógio real (prazo aberto no mês da carga).
+        # Escreve: cancela a nota 27/5 com o relógio real (prazo aberto no mês da carga).
         # Depois do cancelamento com FIXED_DATE: o snapshot do caso 209 (prestador 27) foi capturado sem este cancelamento.
         env:
           NFSE_PARIDADE_ORACLE: "User Id=NFSE_MODERNO_APP;Password=moderno_app_dev_123;Data Source=127.0.0.1:1521/FREEPDB1"
@@ -120,12 +120,13 @@ jobs:
           dotnet-version: 10.0.x
       - name: Paridade e garantias do banco
         run: dotnet test tests/Nfse.Paridade.Testes -c Release
+      - name: Paridade do cancelamento (FIXED_DATE no XEPDB1)
+        run: tests/paridade/cancelamento-fixed-date.sh
       - name: K08 corrigido pelo wrapper
+        # Depois do FIXED_DATE, como no job compose: a nota 27/5 do K08 está na competência que o caso 209 compara.
         env:
           NFSE_PARIDADE_K08: "1"
         run: dotnet test tests/Nfse.Paridade.Testes -c Release --no-build --filter "FullyQualifiedName~Nfse.Paridade.Testes.GarantiaK08Tests"
-      - name: Paridade do cancelamento (FIXED_DATE no XEPDB1)
-        run: tests/paridade/cancelamento-fixed-date.sh
       - name: Leituras conferidas de novo
         run: dotnet test tests/Nfse.Paridade.Testes -c Release --no-build --filter "FullyQualifiedName~Nfse.Paridade.Testes.ParidadeLeiturasTests"
       - name: Estado e logs
