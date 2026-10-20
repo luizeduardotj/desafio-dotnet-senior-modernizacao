@@ -4,6 +4,7 @@ using Nfse.Adaptadores.Soap;
 using Nfse.Aplicacao.Cancelamento;
 using Nfse.Aplicacao.Consultas;
 using Nfse.Aplicacao.Portas;
+using Nfse.Host;
 using Nfse.Infra.Oracle;
 using Nfse.Observabilidade;
 using OpenTelemetry.Trace;
@@ -50,8 +51,8 @@ builder.Services.AddAuthorization();
 builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi();
 
-// TODO(ADR-0007): check "ready" do Oracle.
-builder.Services.AddHealthChecks();
+// Pronto só com o Oracle respondendo (ProntidaoDoOracle); vivo não depende dele.
+builder.Services.AddHealthChecks().AddCheck<ProntidaoDoOracle>("oracle", tags: ["ready"]);
 
 var app = builder.Build();
 

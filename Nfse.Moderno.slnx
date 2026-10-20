@@ -17,5 +17,6 @@
     <Project Path="tests/Nfse.Fachada.Testes/Nfse.Fachada.Testes.csproj" />
     <Project Path="tests/Nfse.Host.Testes/Nfse.Host.Testes.csproj" />
     <Project Path="tests/Nfse.Paridade.Testes/Nfse.Paridade.Testes.csproj" />
+    <Project Path="tests/Nfse.Resiliencia.Testes/Nfse.Resiliencia.Testes.csproj" />
   </Folder>
 </Solution>

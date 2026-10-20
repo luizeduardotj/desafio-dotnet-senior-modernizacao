@@ -1,0 +1,61 @@
+# Cenário de resiliência (tests/resiliencia/README.md): o serviço novo fala com o Oracle através do Toxiproxy, que os
+# testes usam para deixar o banco lento ou fora do ar só para o novo. O legado continua direto no Oracle.
+# Só vale junto do compose padrão e com project name próprio; o compose padrão não muda:
+#   docker compose -p nfse-resiliencia -f docker-compose.yml -f tests/resiliencia/docker-compose.resiliencia.yml up -d --build --wait
+# Portas: todas trocadas (!override) para não colidir com outro compose de pé na mesma máquina, sempre em 127.0.0.1.
+# Sem o otel-lgtm (~2 GB): os testes observam a fachada pelos logs. O OTLP da fachada e do novo fica desligado; o
+# agente do legado não muda e só não tem para onde exportar.
+
+services:
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    command: ["-host=0.0.0.0", "-config=/config/toxiproxy.json"]
+    volumes:
+      - ./tests/resiliencia/toxiproxy.json:/config/toxiproxy.json:ro
+    ports:
+      # API de controle, só para os testes (toxics, enabled).
+      - "127.0.0.1:${NFSE_RESILIENCIA_PORTA_TOXIPROXY:-18474}:8474"
+    healthcheck:
+      test: ["CMD", "/toxiproxy-cli", "list"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  oracle:
+    ports: !override
+      # Os testes seguram o lock da nota e conferem o estado depois, como NFSE_OWNER.
+      - "127.0.0.1:${NFSE_RESILIENCIA_PORTA_ORACLE:-11521}:1521"
+
+  nfse-novo:
+    environment:
+      ConnectionStrings__Oracle: "User Id=NFSE_MODERNO_APP;Password=${NFSE_MODERNO_APP_PASSWORD:-moderno_app_dev_123};Data Source=toxiproxy:1521/FREEPDB1"
+      ConnectionStrings__OracleSomenteLeitura: "User Id=NFSE_MODERNO_RO;Password=${NFSE_MODERNO_RO_PASSWORD:-moderno_ro_dev_123};Data Source=toxiproxy:1521/FREEPDB1"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ""
+    ports: !override
+      - "127.0.0.1:${NFSE_RESILIENCIA_PORTA_NOVO:-18090}:8080"
+    depends_on: !override
+      oracle:
+        condition: service_healthy
+      toxiproxy:
+        condition: service_healthy
+
+  fachada:
+    environment:
+      # Canal da sombra pequeno e um worker só: com o novo lento, uma rajada curta já mostra o descarte (ADR-0009).
+      Sombra__CapacidadeDoCanal: "2"
+      Sombra__Concorrencia: "1"
+      # O descarte só sai em log no nível Debug (ADR-0012: nada de dado pessoal no registro).
+      Logging__LogLevel__Nfse.Fachada.Sombra.PublicadorDaSombra: Debug
+      OTEL_EXPORTER_OTLP_ENDPOINT: ""
+    volumes:
+      # Mesmo destino do compose padrão, que o substitui: as flags vêm da pasta que os testes reescrevem.
+      - ${NFSE_RESILIENCIA_FLAGS:-./tests/resiliencia/.flags}:/config/flags:ro
+    ports: !override
+      - "127.0.0.1:${NFSE_RESILIENCIA_PORTA_FACHADA:-18080}:8080"
+    depends_on: !override
+      webservices:
+        condition: service_healthy
+
+  otel-lgtm:
+    profiles: ["observabilidade"]
+    ports: !reset []

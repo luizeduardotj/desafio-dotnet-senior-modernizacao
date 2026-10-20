@@ -87,14 +87,24 @@ public sealed class DadosFalsos : IContribuintes, ILeituraDeNotas, IGatewayDeCan
     public Task<ResultadoDoGateway> CancelarAsync(long prestadorId, long numero, string motivo, CancellationToken cancellationToken)
     {
         UltimoCancelamento = (prestadorId, numero, motivo);
-        return Task.FromResult(RespostaDoCancelamento);
+        return FalhaDoBanco is { } falha ? Task.FromException<ResultadoDoGateway>(falha) : Task.FromResult(RespostaDoCancelamento);
     }
 
+    /// <summary>Quando definida, toda leitura de contribuinte falha com ela (ex.: banco fora do ar).</summary>
+    public Exception? FalhaDoBanco { get; set; }
+
     public Task<PrestadorLido?> ObterPorInscricaoAsync(string inscricaoMunicipal, CancellationToken cancellationToken) =>
-        Task.FromResult(Prestadores.FirstOrDefault(p => p.InscricaoMunicipal == inscricaoMunicipal));
+        FalhaDoBanco is { } falha
+            ? Task.FromException<PrestadorLido?>(falha)
+            : Task.FromResult(Prestadores.FirstOrDefault(p => p.InscricaoMunicipal == inscricaoMunicipal));
 
     public Task<IReadOnlyList<NotaFiscalLida>> ListarEmitidasPorFaixaAsync(FiltroDeNotasEmitidas filtro, int deslocamento, int limite, CancellationToken cancellationToken)
     {
+        if (FalhaDoBanco is { } falha)
+        {
+            return Task.FromException<IReadOnlyList<NotaFiscalLida>>(falha);
+        }
+
         UltimoFiltro = filtro;
         IReadOnlyList<NotaFiscalLida> resultado = [.. Filtrar(filtro).Skip(Math.Max(0, deslocamento)).Take(Math.Max(0, limite - Math.Max(0, deslocamento)))];
         return Task.FromResult(resultado);
@@ -102,6 +112,11 @@ public sealed class DadosFalsos : IContribuintes, ILeituraDeNotas, IGatewayDeCan
 
     public Task<IReadOnlyList<NotaFiscalLida>> ListarEmitidasAposAsync(FiltroDeNotasEmitidas filtro, PosicaoNaListagem? apos, int limite, CancellationToken cancellationToken)
     {
+        if (FalhaDoBanco is { } falha)
+        {
+            return Task.FromException<IReadOnlyList<NotaFiscalLida>>(falha);
+        }
+
         UltimoFiltro = filtro;
         IEnumerable<NotaFiscalLida> notas = Filtrar(filtro);
         if (apos is { } p)
@@ -115,6 +130,11 @@ public sealed class DadosFalsos : IContribuintes, ILeituraDeNotas, IGatewayDeCan
 
     public Task<IReadOnlyList<NotaFiscalLida>> ListarTomadasPorFaixaAsync(FiltroDeNotasTomadas filtro, int deslocamento, int limite, CancellationToken cancellationToken)
     {
+        if (FalhaDoBanco is { } falha)
+        {
+            return Task.FromException<IReadOnlyList<NotaFiscalLida>>(falha);
+        }
+
         UltimoFiltroTomadas = filtro;
         IReadOnlyList<NotaFiscalLida> resultado = [.. Filtrar(filtro).Skip(Math.Max(0, deslocamento)).Take(Math.Max(0, limite - Math.Max(0, deslocamento)))];
         return Task.FromResult(resultado);
@@ -122,6 +142,11 @@ public sealed class DadosFalsos : IContribuintes, ILeituraDeNotas, IGatewayDeCan
 
     public Task<IReadOnlyList<NotaFiscalLida>> ListarTomadasAposAsync(FiltroDeNotasTomadas filtro, PosicaoNaListagem? apos, int limite, CancellationToken cancellationToken)
     {
+        if (FalhaDoBanco is { } falha)
+        {
+            return Task.FromException<IReadOnlyList<NotaFiscalLida>>(falha);
+        }
+
         UltimoFiltroTomadas = filtro;
         IEnumerable<NotaFiscalLida> notas = Filtrar(filtro);
         if (apos is { } p)
@@ -154,3 +179,6 @@ public sealed class DadosFalsos : IContribuintes, ILeituraDeNotas, IGatewayDeCan
         new PrestadorLido(1, "10000001", "11100003000113", "PRESTADOR 1", true),
         Documento.Reconstituir(tomador), "TOMADOR");
 }
+
+/// <summary>Como uma <c>OracleException</c> de conexão recusada ou de pool esgotado, sem depender do ODP.NET.</summary>
+public sealed class BancoForaDoAr() : System.Data.Common.DbException("banco fora do ar");

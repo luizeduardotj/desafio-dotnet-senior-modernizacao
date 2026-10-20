@@ -131,6 +131,26 @@ jobs:
         if: always()
         run: docker compose $COMPOSE_ARGS down -v
 
+  resiliencia:
+    # Oracle lento ou fora do ar só para o serviço novo (Toxiproxy), pela fachada: fallback das leituras, Fault do
+    # cancelamento sem escrita dupla, sombra fora do caminho do cliente e recuperação sem restart. Job à parte para não
+    # alongar o compose; sobe o próprio ambiente do zero (tests/resiliencia/README.md).
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Resiliência (sobe, testa e derruba)
+        run: tests/resiliencia/rodar.sh
+      - name: Medições no resumo do job
+        if: always()
+        run: |
+          if [ -f TestResults/resiliencia-medicoes.md ]; then
+            { echo "### Resiliência: tempos medidos"; echo; cat TestResults/resiliencia-medicoes.md; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   manifests:
     # Valida os overlays de deploy/k8s contra os schemas do Kubernetes e dos CRDs (Argo Rollouts, External Secrets, OpenFeature).
     # Não precisa de cluster. Binários com versão e SHA-256 fixos; o schema dos CRDs vem do datreeio/CRDs-catalog.

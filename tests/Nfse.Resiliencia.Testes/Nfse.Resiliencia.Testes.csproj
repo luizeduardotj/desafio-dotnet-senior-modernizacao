@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Caixa-preta: fala com a fachada, o novo, o Toxiproxy e o Oracle do compose de resiliência; não referencia src/. -->
+  <ItemGroup>
+    <PackageReference Include="Oracle.ManagedDataAccess.Core" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" />
+  </ItemGroup>
+
+</Project>

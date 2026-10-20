@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Diagnostics;
 using System.Security;
 using System.Xml;
@@ -81,6 +82,15 @@ public static partial class EndpointSoap
             await FalhaAsync(ctx, "soap:Client", "Envelope SOAP inválido").ConfigureAwait(false);
             return;
         }
+        catch (DbException ex) when (operacao is "ConsultarNfse" or "ConsultarNfseServicoTomado")
+        {
+            // Banco fora do ar, pool esgotado, timeout: numa leitura, 503 faz a fachada tentar o legado uma vez
+            // (ADR-0008). O 500 é o Fault que a fachada entrega ao cliente sem fallback. O cancelamento continua com o
+            // Fault abaixo: depois do envio não há fallback.
+            LogBancoIndisponivel(logs.CreateLogger(typeof(EndpointSoap)), operacao, ex);
+            ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            return;
+        }
 #pragma warning disable CA1031 // o contrato do legado devolve Fault para qualquer erro interno
         catch (Exception ex) when (ex is not OperationCanceledException)
 #pragma warning restore CA1031
@@ -133,4 +143,7 @@ public static partial class EndpointSoap
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Erro interno na operação SOAP {Operacao}")]
     private static partial void LogErroInterno(ILogger logger, string operacao, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Banco indisponível na operação SOAP {Operacao}; 503 para a fachada usar o legado")]
+    private static partial void LogBancoIndisponivel(ILogger logger, string operacao, Exception ex);
 }
